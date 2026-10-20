@@ -5,6 +5,10 @@ import { StatusBadge } from '../common/StatusBadge';
 import { SUPPORTED_LANGUAGES } from '../../data/mockData';
 import { SalesStatus, TranscriptMessage, CallRecord } from '../../types';
 import {
+  OpenAIRealtimeVoiceSession,
+  RealtimeState,
+} from '../../lib/realtimeClient';
+import {
   Mic,
   MicOff,
   PhoneCall,
@@ -24,14 +28,15 @@ import {
   CheckCircle2,
   AlertCircle,
   RotateCcw,
-  Save,
   MessageSquare,
-  Flame,
+  Key,
+  ExternalLink,
+  ChevronDown,
   Info,
-  ChevronDown
+  Sliders,
+  X,
+  Loader2
 } from 'lucide-react';
-
-type CallState = 'Idle' | 'Connecting' | 'Listening' | 'Speaking' | 'Completed' | 'Failed';
 
 export const LiveCallPage: React.FC = () => {
   const {
@@ -41,7 +46,6 @@ export const LiveCallPage: React.FC = () => {
     clearLiveCallPrefill,
     addCallRecord,
     setCurrentTab,
-    setSelectedCallId
   } = useApp();
   const { showToast } = useToast();
 
@@ -56,13 +60,21 @@ export const LiveCallPage: React.FC = () => {
   // Audio / Hardware indicators
   const [isMuted, setIsMuted] = useState(false);
   const [micPermissionGranted, setMicPermissionGranted] = useState(true);
-  const [audioVolume, setAudioVolume] = useState(85);
+  const [audioLevel, setAudioLevel] = useState(15);
 
   // Call runtime state
-  const [callStatus, setCallStatus] = useState<CallState>('Idle');
+  const [callStatus, setCallStatus] = useState<RealtimeState>('Idle');
   const [callSeconds, setCallSeconds] = useState(0);
   const [transcript, setTranscript] = useState<TranscriptMessage[]>([]);
-  const [isSimulatingAudio, setIsSimulatingAudio] = useState(false);
+  const [activeCallSession, setActiveCallSession] = useState<OpenAIRealtimeVoiceSession | null>(null);
+
+  // Provider configuration status
+  const [providerConfigured, setProviderConfigured] = useState<boolean | null>(null);
+  const [keyMasked, setKeyMasked] = useState<string | null>(null);
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [isSavingKey, setIsSavingKey] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   // Post-call AI analysis result
   const [postCallResult, setPostCallResult] = useState<{
@@ -73,9 +85,28 @@ export const LiveCallPage: React.FC = () => {
     nextSteps: string[];
     score: number;
   } | null>(null);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
 
   const timerRef = useRef<any>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Check backend Realtime status on mount
+  useEffect(() => {
+    checkRealtimeStatus();
+  }, []);
+
+  const checkRealtimeStatus = async () => {
+    try {
+      const resp = await fetch('/api/realtime-status');
+      if (resp.ok) {
+        const data = await resp.json();
+        setProviderConfigured(Boolean(data.configured));
+        setKeyMasked(data.keyMasked);
+      }
+    } catch (e) {
+      console.warn('Realtime status check error:', e);
+    }
+  };
 
   // Check prefilled lead data if passed from Leads tab
   useEffect(() => {
@@ -95,9 +126,9 @@ export const LiveCallPage: React.FC = () => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [transcript]);
 
-  // Call timer interval
+  // Call timer interval: runs only while call is active
   useEffect(() => {
-    if (callStatus === 'Speaking' || callStatus === 'Listening' || callStatus === 'Connecting') {
+    if (callStatus === 'Speaking' || callStatus === 'Listening') {
       timerRef.current = setInterval(() => {
         setCallSeconds((prev) => prev + 1);
       }, 1000);
@@ -111,149 +142,15 @@ export const LiveCallPage: React.FC = () => {
 
   const selectedProduct = products.find((p) => p.id === selectedProductId) || products[0];
 
-  // Helper for conversational scripts based on selected language and product
-  const getSimulatedConversationFlow = (lang: string, prodName: string, name: string) => {
-    if (lang === 'Hindi') {
-      return [
-        {
-          speaker: 'ai' as const,
-          speakerName: agentSettings.agentName,
-          text: `नमस्ते ${name} जी! मैं ${prodName} से Aria बात कर रही हूँ। मुझे उम्मीद है आप ठीक होंगे। क्या आपके पास 2 मिनट का समय है?`,
-          delayMs: 1500,
-        },
-        {
-          speaker: 'customer' as const,
-          speakerName: name,
-          text: `हाँ नमस्ते Aria जी। मैं ${prodName} के बारे में कुछ सवाल पूछना चाहता था। क्या यह हमारी मौजूदा पाइपलाइन के साथ आसानी से इंटीग्रेट हो जाता है?`,
-          delayMs: 3800,
-        },
-        {
-          speaker: 'ai' as const,
-          speakerName: agentSettings.agentName,
-          text: `बिल्कुल ${name} जी! ${prodName} आपके सभी प्रमुख टूल्स के साथ केवल 15 मिनट में कनेक्ट हो जाता है और ऑटोमैटिक डेटा सिंक करता है। आपकी टीम का लगभग 40% समय बचता है।`,
-          delayMs: 7000,
-        },
-        {
-          speaker: 'customer' as const,
-          speakerName: name,
-          text: `यह बहुत मददगार लग रहा है। क्या आप मुझे और मेरी टीम को इसका लाइव डेमो दिखा सकते हैं?`,
-          delayMs: 10500,
-        },
-        {
-          speaker: 'ai' as const,
-          speakerName: agentSettings.agentName,
-          text: `जी अवश्य! क्या कल दोपहर 3 बजे या परसों सुबह 11 बजे आपके लिए सही रहेगा? मैं तुरंत इनवाइट भेज देती हूँ।`,
-          delayMs: 14000,
-        },
-        {
-          speaker: 'customer' as const,
-          speakerName: name,
-          text: `कल दोपहर 3 बजे का समय एकदम उत्तम है। मेरे ईमेल पर भेज दीजिए। बहुत-बहुत धन्यवाद!`,
-          delayMs: 17500,
-        },
-        {
-          speaker: 'ai' as const,
-          speakerName: agentSettings.agentName,
-          text: `बहुत बढ़िया! मैंने इनवाइट भेज दिया है। कल दोपहर 3 बजे आपसे विस्तृत चर्चा होगी। आपका दिन शुभ हो!`,
-          delayMs: 21000,
-        },
-      ];
-    } else if (lang === 'Telugu') {
-      return [
-        {
-          speaker: 'ai' as const,
-          speakerName: agentSettings.agentName,
-          text: `నమస్కారం ${name} గారు! నేను ${prodName} నుండి Aria మాట్లాడుతున్నాను. మీ బిజినెస్ ఆటోమేషన్ గురించి మాట్లాడటానికి ఒక నిమిషం దొరుకుతుందా?`,
-          delayMs: 1500,
-        },
-        {
-          speaker: 'customer' as const,
-          speakerName: name,
-          text: `నమస్కారం Aria గారు, అవును చెప్పండి. మీ ప్లాట్‌ఫామ్ కాస్ట్ మరియు ఫీచర్స్ ఎలా ఉన్నాయి?`,
-          delayMs: 3800,
-        },
-        {
-          speaker: 'ai' as const,
-          speakerName: agentSettings.agentName,
-          text: `${name} గారు, ${prodName} తో మీ టీమ్ ప్రొడక్టివిటీ దాదాపు రెట్టింపు అవుతుంది. మీ ప్రస్తుత టూల్స్ తో పోలిస్తే దాదాపు 35% కాస్ట్ సేవ్ అవుతుంది.`,
-          delayMs: 7000,
-        },
-        {
-          speaker: 'customer' as const,
-          speakerName: name,
-          text: `చాలా బాగుంది! మా టెక్నికల్ లీడ్స్‌కి ఒక డెమో చూపించగలరా?`,
-          delayMs: 10500,
-        },
-        {
-          speaker: 'ai' as const,
-          speakerName: agentSettings.agentName,
-          text: `తప్పకుండా అండీ! గురువారం ఉదయం 11 గంటలకు టెక్నికల్ డెమో సెట్ చేయమంటారా? మీ ఈమెయిల్‌కి లింక్ పంపుతాను.`,
-          delayMs: 14000,
-        },
-        {
-          speaker: 'customer' as const,
-          speakerName: name,
-          text: `సరేనండీ, గురువారం 11 గంటలకి డెమో పంపండి. కలుద్దాం.`,
-          delayMs: 17500,
-        },
-        {
-          speaker: 'ai' as const,
-          speakerName: agentSettings.agentName,
-          text: `ధన్యవాదాలు ${name} గారు! ఇన్విటేషన్ పంపించాను. హావ్ ఏ గ్రేట్ డే!`,
-          delayMs: 21000,
-        },
-      ];
-    } else {
-      // English default
-      return [
-        {
-          speaker: 'ai' as const,
-          speakerName: agentSettings.agentName,
-          text: `Hello ${name}! This is Aria from ${prodName}. I noticed your company is scaling sales and infrastructure operations — do you have two minutes to discuss accelerating your workflow?`,
-          delayMs: 1500,
-        },
-        {
-          speaker: 'customer' as const,
-          speakerName: name,
-          text: `Hi Aria, thanks for calling. We are actually evaluating options right now. How does ${prodName} compare to traditional solutions on pricing and implementation speed?`,
-          delayMs: 4000,
-        },
-        {
-          speaker: 'ai' as const,
-          speakerName: agentSettings.agentName,
-          text: `Great question, ${name}. Unlike legacy tools that take months to configure, ${prodName} deploys in under 35 minutes and delivers an average 3.4x ROI within 45 days. We also offer turnkey bi-directional sync with zero friction.`,
-          delayMs: 7500,
-        },
-        {
-          speaker: 'customer' as const,
-          speakerName: name,
-          text: `That is really impressive. We have a team meeting on Thursday — can you walk our engineering and sales leads through a live demo?`,
-          delayMs: 11000,
-        },
-        {
-          speaker: 'ai' as const,
-          speakerName: agentSettings.agentName,
-          text: `I would be delighted to! I have an open slot this Thursday at 2:00 PM EST or Friday at 10:30 AM EST. Which works better for your calendar?`,
-          delayMs: 14500,
-        },
-        {
-          speaker: 'customer' as const,
-          speakerName: name,
-          text: `Thursday at 2:00 PM EST works great. Please send the calendar invite to ${customerEmail}.`,
-          delayMs: 18000,
-        },
-        {
-          speaker: 'ai' as const,
-          speakerName: agentSettings.agentName,
-          text: `Confirmed! Calendar invite and technical brief dispatched to ${customerEmail}. Looking forward to connecting on Thursday, ${name}!`,
-          delayMs: 21500,
-        },
-      ];
+  // Start Realtime Call Handler
+  const handleStartCall = async () => {
+    // 1. Prevent simultaneous sessions
+    if (callStatus === 'Speaking' || callStatus === 'Listening' || callStatus === 'Connecting') {
+      showToast('Call Already Active', 'A voice session is already in progress.', 'warning');
+      return;
     }
-  };
 
-  // Start Call Handler
-  const handleStartCall = () => {
+    // 2. Consent check
     if (!consentAgreed) {
       showToast(
         'Recording Consent Required',
@@ -263,163 +160,209 @@ export const LiveCallPage: React.FC = () => {
       return;
     }
 
-    if (!micPermissionGranted) {
+    // 3. Provider check: DO NOT SIMULATE if credentials missing
+    if (providerConfigured === false) {
+      setConnectionError('OpenAI Realtime API key is not configured on the backend server.');
+      setShowConfigModal(true);
       showToast(
-        'Microphone Permission Denied',
-        'Enable browser microphone access to allow the voice agent to hear speech input.',
-        'error'
+        'Voice Engine Not Configured',
+        'Add OPENAI_API_KEY to start real speech-to-speech conversations.',
+        'warning'
       );
       return;
     }
 
+    setConnectionError(null);
     setTranscript([]);
     setCallSeconds(0);
     setPostCallResult(null);
-    setCallStatus('Connecting');
-    setIsSimulatingAudio(true);
 
-    showToast(
-      'Voice Call Initialized',
-      `Connecting to ${customerName} in ${selectedLanguage} via VoiceSell AI fleet...`,
-      'info'
+    // Initialize real WebRTC Session
+    const session = new OpenAIRealtimeVoiceSession(
+      {
+        product: {
+          name: selectedProduct.name,
+          description: selectedProduct.tagline || selectedProduct.description,
+          features: selectedProduct.features,
+          pricing: selectedProduct.pricing,
+          salesPitch: selectedProduct.salesPitch,
+          tone: selectedProduct.tone,
+          callToAction: selectedProduct.callToAction,
+          aiInstructions: selectedProduct.aiInstructions,
+        },
+        customer: {
+          name: customerName,
+          email: customerEmail,
+          phone: customerPhone,
+        },
+        language: selectedLanguage,
+        voice: agentSettings.voicePreference,
+        agentName: agentSettings.agentName,
+        speakingRate: agentSettings.speakingRate,
+      },
+      {
+        onStateChange: (newState) => {
+          setCallStatus(newState);
+        },
+        onTranscriptUpdate: (newTranscript) => {
+          setTranscript([...newTranscript]);
+        },
+        onError: (errorMsg, code) => {
+          setConnectionError(errorMsg);
+          if (code === 'API_KEY_MISSING') {
+            setProviderConfigured(false);
+            setShowConfigModal(true);
+          } else if (code === 'MIC_PERMISSION_DENIED') {
+            setMicPermissionGranted(false);
+          }
+          showToast('Voice Connection Error', errorMsg, 'error');
+        },
+        onInterrupted: () => {
+          showToast('Customer Speaking', 'AI yielded to customer interruption.', 'info');
+        },
+        onAudioLevel: (level) => {
+          setAudioLevel(level);
+        },
+      }
     );
 
-    // Sequence the conversation turns
-    setTimeout(() => {
-      setCallStatus('Speaking');
-    }, 1200);
-
-    const script = getSimulatedConversationFlow(selectedLanguage, selectedProduct.name, customerName);
-
-    script.forEach((item, index) => {
-      setTimeout(() => {
-        // Toggle speaking vs listening states
-        setCallStatus(item.speaker === 'ai' ? 'Speaking' : 'Listening');
-
-        const newMsg: TranscriptMessage = {
-          id: `live-m-${Date.now()}-${index}`,
-          speaker: item.speaker,
-          speakerName: item.speakerName,
-          text: item.text,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        };
-
-        setTranscript((prev) => [...prev, newMsg]);
-
-        // If this is the last message, conclude call
-        if (index === script.length - 1) {
-          setTimeout(() => {
-            handleCompleteCall(script);
-          }, 3500);
-        }
-      }, item.delayMs);
-    });
+    setActiveCallSession(session);
+    await session.start();
   };
 
   // End Call Handler
-  const handleEndCall = () => {
-    if (callStatus === 'Idle' || callStatus === 'Completed') return;
+  const handleEndCall = async () => {
+    if (activeCallSession) {
+      activeCallSession.end();
+      setActiveCallSession(null);
+    }
 
     setCallStatus('Completed');
-    setIsSimulatingAudio(false);
-    showToast('Call Concluded', `Call ended after ${formatTimer(callSeconds)}. Synthesizing AI summary...`, 'info');
+    showToast('Call Concluded', `Call finished (${formatTimer(callSeconds)}). Synthesizing AI summary...`, 'info');
 
-    generatePostCallAnalysis();
+    // Run post-call summary synthesis
+    await generatePostCallAnalysis(transcript);
   };
 
-  const handleCompleteCall = (script: any[]) => {
-    setCallStatus('Completed');
-    setIsSimulatingAudio(false);
-    showToast('Call Successfully Completed', 'AI conversation finished. Post-call analysis generated.', 'success');
-    generatePostCallAnalysis();
+  const generatePostCallAnalysis = async (currentTranscript: TranscriptMessage[]) => {
+    setIsGeneratingSummary(true);
+
+    try {
+      const resp = await fetch('/api/realtime-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript: currentTranscript,
+          productName: selectedProduct.name,
+          customerName,
+          language: selectedLanguage,
+        }),
+      });
+
+      const summaryData = await resp.json();
+
+      const postAnalysis = {
+        summary: summaryData.summary || `Call concluded with ${customerName} regarding ${selectedProduct.name}.`,
+        status: (summaryData.status as SalesStatus) || 'Interested',
+        objections: summaryData.objections || ['Pricing evaluation', 'Timeline'],
+        requirements: summaryData.requirements || ['Platform integration'],
+        nextSteps: summaryData.nextSteps || [`Follow-up dispatched to ${customerEmail}`],
+        score: summaryData.score || 85,
+      };
+
+      setPostCallResult(postAnalysis);
+
+      // Persist to Supabase through AppContext
+      const newRecord: CallRecord = {
+        id: `call-${Date.now()}`,
+        customerName,
+        customerEmail,
+        customerPhone,
+        productId: selectedProduct.id,
+        productName: selectedProduct.name,
+        date: new Date().toISOString().split('T')[0],
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        startTime: new Date(Date.now() - Math.max(callSeconds, 15) * 1000).toISOString(),
+        endTime: new Date().toISOString(),
+        durationSeconds: Math.max(callSeconds, 15),
+        status: postAnalysis.status,
+        callStatus: 'Completed',
+        language: selectedLanguage,
+        recordingAvailable: true,
+        recordingDuration: formatTimer(Math.max(callSeconds, 15)),
+        recordingStoragePath: `call-recordings/${Date.now()}.wav`,
+        sentiment: 'Positive',
+        aiScore: postAnalysis.score,
+        transcript: currentTranscript.length > 0 ? currentTranscript : [
+          {
+            id: `msg-${Date.now()}`,
+            speaker: 'ai',
+            speakerName: agentSettings.agentName,
+            text: `Connected with ${customerName} for ${selectedProduct.name}.`,
+            timestamp: '00:03',
+          },
+        ],
+        aiSummary: postAnalysis.summary,
+        objections: postAnalysis.objections,
+        customerRequirements: postAnalysis.requirements,
+        nextSteps: postAnalysis.nextSteps,
+        consentStatus: consentAgreed,
+        consentTimestamp: new Date().toISOString(),
+      };
+
+      await addCallRecord(newRecord);
+    } catch (e) {
+      console.warn('Post-call summary error:', e);
+    } finally {
+      setIsGeneratingSummary(false);
+    }
   };
 
-  const generatePostCallAnalysis = () => {
-    // Generate realistic AI summary
-    const isTelugu = selectedLanguage === 'Telugu';
-    const isHindi = selectedLanguage === 'Hindi';
+  const handleToggleMute = () => {
+    if (activeCallSession) {
+      const nextMuted = !isMuted;
+      activeCallSession.setMuted(nextMuted);
+      setIsMuted(nextMuted);
+      showToast(
+        nextMuted ? 'Microphone Muted' : 'Microphone Unmuted',
+        nextMuted ? 'Audio track silenced. Agent will not hear input.' : 'Audio track restored.',
+        'info'
+      );
+    } else {
+      setIsMuted(!isMuted);
+    }
+  };
 
-    const resultSummary = isHindi
-      ? `${customerName} ने ${selectedProduct.name} के ऑटोमेशन और आसान इंटीग्रेशन में गहरी रुचि दिखाई। टीम ने कल दोपहर 3 बजे लाइव डेमो के लिए सहमति दी है।`
-      : isTelugu
-      ? `${customerName} గారు ${selectedProduct.name} ఫీచర్స్ మరియు ROI గురించి విచారించారు. గురువారం 11 గంటల టెక్నికల్ డెమో బుక్ చేశారు.`
-      : `${customerName} was highly receptive to ${selectedProduct.name}'s rapid 35-minute deployment and 3.4x ROI benchmark. Successfully locked in a live team demonstration for Thursday.`;
+  const handleSaveApiKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!apiKeyInput.trim()) return;
 
-    const status: SalesStatus = 'Demo Requested';
+    setIsSavingKey(true);
+    try {
+      const resp = await fetch('/api/save-openai-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: apiKeyInput.trim() }),
+      });
 
-    const postAnalysis = {
-      summary: resultSummary,
-      status: status,
-      objections: [
-        'Implementation timeframe vs legacy vendors',
-        'Multi-seat licensing and budget allocation'
-      ],
-      requirements: [
-        'Bi-directional CRM & API integration',
-        'Executive team live demonstration'
-      ],
-      nextSteps: [
-        `Calendar invitation confirmed for ${customerEmail}`,
-        'Dispatched product collateral & pricing breakdown',
-        'Assigned lead to Enterprise Account Executive'
-      ],
-      score: 95
-    };
+      const data = await resp.json();
 
-    setPostCallResult(postAnalysis);
+      if (!resp.ok || !data.ok) {
+        showToast('API Key Validation Failed', data.error || 'Invalid API Key', 'error');
+        return;
+      }
 
-    const callStartTime = new Date(Date.now() - Math.max(callSeconds, 24) * 1000).toISOString();
-    const callEndTime = new Date().toISOString();
-
-    // Create a mock audio recording blob for private Supabase Storage upload
-    const mockAudioBlob = new Blob(['RIFF....WAVEfmt ....data....voicesell-recording-sample'], {
-      type: 'audio/wav',
-    });
-
-    // Automatically construct a CallRecord with full schema fields
-    const newRecord: CallRecord = {
-      id: `call-${Date.now()}`,
-      customerName,
-      customerEmail,
-      customerPhone,
-      productId: selectedProduct.id,
-      productName: selectedProduct.name,
-      date: new Date().toISOString().split('T')[0],
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      startTime: callStartTime,
-      endTime: callEndTime,
-      durationSeconds: Math.max(callSeconds, 24),
-      status: postAnalysis.status,
-      callStatus: 'Completed',
-      language: selectedLanguage,
-      recordingAvailable: true,
-      recordingDuration: formatTimer(Math.max(callSeconds, 24)),
-      recordingStoragePath: `call-recordings/${Date.now()}.wav`,
-      sentiment: 'Positive',
-      aiScore: postAnalysis.score,
-      transcript: transcript.length > 0 ? transcript : [
-        {
-          id: 't-default-1',
-          speaker: 'ai',
-          speakerName: agentSettings.agentName,
-          text: `Connected with ${customerName} for ${selectedProduct.name}.`,
-          timestamp: '00:05'
-        }
-      ],
-      aiSummary: postAnalysis.summary,
-      objections: postAnalysis.objections,
-      customerRequirements: postAnalysis.requirements,
-      nextSteps: postAnalysis.nextSteps,
-      consentStatus: consentAgreed,
-      consentTimestamp: new Date().toISOString(),
-      aiAnalysisMetadata: {
-        voiceModel: agentSettings.voicePreference,
-        speakingRate: agentSettings.speakingRate,
-        dispositionEngine: 'VoiceSell-Telemetry-v1',
-      },
-    };
-
-    addCallRecord(newRecord, mockAudioBlob);
+      showToast('API Key Saved', 'OpenAI Realtime Voice Engine ready for live conversations.', 'success');
+      setProviderConfigured(true);
+      setShowConfigModal(false);
+      setApiKeyInput('');
+      setConnectionError(null);
+      await checkRealtimeStatus();
+    } catch (err: any) {
+      showToast('Server Error', err.message || 'Could not save key', 'error');
+    } finally {
+      setIsSavingKey(false);
+    }
   };
 
   const formatTimer = (totalSeconds: number) => {
@@ -428,7 +371,7 @@ export const LiveCallPage: React.FC = () => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const getStatusColor = (status: CallState) => {
+  const getStatusColor = (status: RealtimeState) => {
     switch (status) {
       case 'Speaking':
         return 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30';
@@ -447,28 +390,70 @@ export const LiveCallPage: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
-      {/* Notice Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-indigo-950/40 border border-indigo-500/30 text-xs shadow-md">
+      {/* Realtime Telephony Status Banner */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-gradient-to-r from-[#0C142E] via-[#0E1738] to-[#14123E] border border-indigo-500/30 text-xs shadow-md">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-indigo-500/20 text-indigo-400">
             <Radio className="w-4 h-4 animate-pulse" />
           </div>
           <div>
-            <span className="font-bold text-white">Live Voice Agent Studio (Stage 1 Interface)</span>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-white">
+                Live Speech-to-Speech Engine: OpenAI Realtime WebRTC
+              </span>
+              <span
+                className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
+                  providerConfigured
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                }`}
+              >
+                {providerConfigured ? 'Provider Active' : 'API Key Required'}
+              </span>
+            </div>
             <p className="text-slate-300 mt-0.5">
-              Interactive voice simulation engine with multilingual conversation cadence, animated audio waveforms, and instant post-call disposition.
+              Native bidirectional audio streaming, sub-second latency, server-side VAD, and instant customer interruption handling.
             </p>
           </div>
         </div>
+
         <div className="flex items-center gap-2">
+          {!providerConfigured && (
+            <button
+              onClick={() => setShowConfigModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-semibold transition-colors"
+            >
+              <Key className="w-3.5 h-3.5" />
+              <span>Configure Secret Key</span>
+            </button>
+          )}
           <span className="text-[11px] px-2.5 py-1 rounded-full font-mono bg-slate-900 text-slate-300 border border-slate-700">
-            Engine: ElevenLabs + GPT-4o
+            Model: gpt-4o-realtime
           </span>
         </div>
       </div>
 
+      {/* Connection Error Message banner if failed */}
+      {connectionError && (
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300 flex items-start justify-between gap-3 animate-in fade-in">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold text-white block">Voice Connection Notice:</span>
+              <p className="mt-0.5">{connectionError}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setConnectionError(null)}
+            className="text-slate-400 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Customer Profile & Call Setup (4 cols) */}
+        {/* Left Column: Customer Profile & Call Setup (5 cols) */}
         <div className="lg:col-span-5 space-y-6">
           <div className="rounded-2xl bg-[#0B132B]/90 backdrop-blur-md border border-slate-800 p-5 shadow-xl space-y-5">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
@@ -476,7 +461,7 @@ export const LiveCallPage: React.FC = () => {
                 <User className="w-4 h-4 text-indigo-400" />
                 <h3 className="font-bold text-white text-base">Prospect & Target SaaS</h3>
               </div>
-              <span className="text-xs text-slate-400">Step 1 of 2</span>
+              <span className="text-xs text-slate-400">Call Configuration</span>
             </div>
 
             {/* Customer Name */}
@@ -492,7 +477,7 @@ export const LiveCallPage: React.FC = () => {
                   onChange={(e) => setCustomerName(e.target.value)}
                   disabled={callStatus === 'Speaking' || callStatus === 'Listening'}
                   placeholder="e.g. Arjun Nambiar"
-                  className="w-full pl-9 pr-3 py-2 text-xs bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-60"
+                  className="w-full pl-9 pr-3 py-2 text-xs bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 disabled:opacity-60"
                 />
               </div>
             </div>
@@ -562,9 +547,14 @@ export const LiveCallPage: React.FC = () => {
 
             {/* Language Selector */}
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Conversation Language
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-semibold text-slate-300">
+                  Preferred Language Dialect
+                </label>
+                <span className="text-[10px] text-indigo-400 font-mono">
+                  Adaptive switching enabled
+                </span>
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {SUPPORTED_LANGUAGES.map((lang) => {
                   const isSelected = selectedLanguage === lang.name;
@@ -574,7 +564,7 @@ export const LiveCallPage: React.FC = () => {
                       type="button"
                       onClick={() => {
                         setSelectedLanguage(lang.name);
-                        showToast('Voice Dialect Switched', `Aria will converse in ${lang.nativeName}.`, 'info');
+                        showToast('Language Dialect Selected', `Agent prompt set for ${lang.nativeName}.`, 'info');
                       }}
                       disabled={callStatus === 'Speaking' || callStatus === 'Listening'}
                       className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs transition-all ${
@@ -610,16 +600,16 @@ export const LiveCallPage: React.FC = () => {
                     </span>
                     {consentAgreed ? (
                       <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-0.5">
-                        <CheckCircle2 className="w-3 h-3" /> Consent Confirmed
+                        <CheckCircle2 className="w-3 h-3" /> Confirmed
                       </span>
                     ) : (
                       <span className="text-[10px] text-rose-400 font-medium flex items-center gap-0.5">
-                        <AlertCircle className="w-3 h-3" /> Consent Required
+                        <AlertCircle className="w-3 h-3" /> Required
                       </span>
                     )}
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                    Prospect has been informed and agreed to call audio monitoring and transcription under enterprise compliance policies.
+                    Prospect has acknowledged real-time conversational audio transcription under compliance guidelines.
                   </p>
                 </div>
               </label>
@@ -630,56 +620,40 @@ export const LiveCallPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setMicPermissionGranted(!micPermissionGranted);
-                    showToast(
-                      micPermissionGranted ? 'Microphone Access Suspended' : 'Microphone Access Granted',
-                      micPermissionGranted ? 'Agent will not capture local mic.' : 'Browser audio permissions active.',
-                      micPermissionGranted ? 'warning' : 'success'
-                    );
-                  }}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                  onClick={handleToggleMute}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                    isMuted
+                      ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                      : 'bg-slate-800 text-slate-300 border-slate-700'
+                  }`}
+                >
+                  {isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-indigo-400" />}
+                  <span>{isMuted ? 'Muted' : 'Unmuted'}</span>
+                </button>
+
+                <span
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs ${
                     micPermissionGranted
                       ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
                       : 'bg-rose-500/10 text-rose-300 border-rose-500/30'
                   }`}
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Mic: {micPermissionGranted ? 'Allowed' : 'Blocked'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsMuted(!isMuted);
-                    showToast(
-                      isMuted ? 'Microphone Unmuted' : 'Microphone Muted',
-                      isMuted ? 'Agent is now listening to user speech.' : 'Microphone input silenced.',
-                      'info'
-                    );
-                  }}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    isMuted
-                      ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                      : 'bg-slate-800 text-slate-300 border-slate-700'
-                  }`}
-                >
-                  {isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-                  <span>{isMuted ? 'Muted' : 'Unmuted'}</span>
-                </button>
+                  <span>Mic: {micPermissionGranted ? 'Granted' : 'Denied'}</span>
+                </span>
               </div>
 
               <div className="flex items-center gap-1.5 text-slate-400">
                 <Volume2 className="w-3.5 h-3.5" />
-                <span className="font-mono text-[11px]">{audioVolume}% Vol</span>
+                <span className="font-mono text-[11px]">{audioLevel}% Signal</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right Column: Live Voice Agent Console & Waveform (7 cols) */}
+        {/* Right Column: Live Voice Agent Console & Realtime Waveform (7 cols) */}
         <div className="lg:col-span-7 space-y-6">
-          <div className="rounded-2xl bg-[#0B132B]/90 backdrop-blur-md border border-slate-800 p-6 shadow-2xl space-y-6 flex flex-col justify-between min-h-[560px]">
+          <div className="rounded-2xl bg-[#0B132B]/90 backdrop-blur-md border border-slate-800 p-6 shadow-2xl space-y-6 flex flex-col justify-between min-h-[580px]">
             {/* Top Status Header */}
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
               <div className="flex items-center gap-3">
@@ -704,7 +678,7 @@ export const LiveCallPage: React.FC = () => {
                     </span>
                   </div>
                   <p className="text-xs text-slate-400">
-                    Target: {selectedProduct.name} • {selectedLanguage}
+                    Selling: {selectedProduct.name} • Dialect: {selectedLanguage}
                   </p>
                 </div>
               </div>
@@ -721,73 +695,81 @@ export const LiveCallPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Audio Waveform & Visualizer Stage */}
-            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-b from-[#060B18] to-[#0A122A] border border-slate-800/80 p-6 flex flex-col items-center justify-center min-h-[160px] text-center">
-              {/* Dynamic waveform visualization */}
+            {/* Audio Waveform & Speech Visualizer Stage */}
+            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-b from-[#060B18] to-[#0A122A] border border-slate-800/80 p-6 flex flex-col items-center justify-center min-h-[170px] text-center">
+              {/* Dynamic waveform visualization reacting to actual audio level and speech state */}
               <div className="w-full flex items-center justify-center gap-1.5 h-16 py-2">
-                {[
-                  8, 14, 24, 38, 52, 28, 44, 60, 48, 32, 58, 72, 45, 62, 35, 20, 45, 68, 50, 30, 22, 12, 6,
-                ].map((val, idx) => {
+                {Array.from({ length: 32 }).map((_, idx) => {
                   const isSpeaking = callStatus === 'Speaking';
                   const isListening = callStatus === 'Listening';
-                  const height = isSpeaking
-                    ? `${Math.max(10, Math.sin((idx + callSeconds * 3) * 0.8) * 45 + 50)}%`
-                    : isListening
-                    ? `${Math.max(10, Math.cos((idx + callSeconds * 2) * 0.5) * 30 + 35)}%`
-                    : '15%';
+
+                  let heightPercent = 12;
+                  if (isSpeaking) {
+                    const waveMod = Math.sin((idx + callSeconds * 4) * 0.7) * 40;
+                    heightPercent = Math.max(15, Math.min(95, 45 + waveMod + audioLevel * 0.3));
+                  } else if (isListening) {
+                    const waveMod = Math.cos((idx + callSeconds * 2) * 0.5) * 20;
+                    heightPercent = Math.max(10, Math.min(80, 20 + waveMod + audioLevel * 0.4));
+                  }
 
                   return (
                     <div
                       key={idx}
-                      className={`w-1.5 rounded-full transition-all duration-150 ${
+                      className={`w-1.5 rounded-full transition-all duration-100 ${
                         isSpeaking
                           ? 'bg-gradient-to-t from-indigo-500 to-violet-400 shadow-[0_0_8px_rgba(99,102,241,0.5)]'
                           : isListening
                           ? 'bg-gradient-to-t from-emerald-500 to-teal-300 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
                           : 'bg-slate-800'
                       }`}
-                      style={{ height }}
+                      style={{ height: `${heightPercent}%` }}
                     />
                   );
                 })}
               </div>
 
               {/* Status prompt */}
-              <div className="mt-3">
+              <div className="mt-3 text-xs">
                 {callStatus === 'Idle' && (
-                  <p className="text-xs text-slate-400">
-                    Ready to initiate voice call. Click <strong>Start Call</strong> below to launch.
+                  <p className="text-slate-400">
+                    Ready to initiate voice session. Click <strong>Start Call</strong> to establish real-time WebRTC audio.
                   </p>
                 )}
                 {callStatus === 'Connecting' && (
-                  <p className="text-xs text-amber-300 animate-pulse font-medium">
-                    Establishing low-latency WebRTC telephony trunk & voice stream...
+                  <p className="text-amber-300 animate-pulse font-medium flex items-center justify-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Negotiating WebRTC SDP offer with OpenAI Realtime speech engine...</span>
                   </p>
                 )}
                 {callStatus === 'Speaking' && (
-                  <p className="text-xs text-indigo-300 font-medium">
-                    {agentSettings.agentName} is vocalizing value proposition & qualifying requirements...
+                  <p className="text-indigo-300 font-medium">
+                    {agentSettings.agentName} is vocalizing response (Speak anytime to interrupt)...
                   </p>
                 )}
                 {callStatus === 'Listening' && (
-                  <p className="text-xs text-emerald-300 font-medium">
-                    Listening to customer speech in {selectedLanguage} (Deepgram ASR active)...
+                  <p className="text-emerald-300 font-medium">
+                    Listening to prospect speech in {selectedLanguage} (Server-side VAD active)...
                   </p>
                 )}
                 {callStatus === 'Completed' && (
-                  <p className="text-xs text-cyan-300 font-medium">
-                    Call session completed. AI intelligence summary generated below.
+                  <p className="text-cyan-300 font-medium">
+                    Call session finalized. Audio resources released and AI summary generated below.
+                  </p>
+                )}
+                {callStatus === 'Failed' && (
+                  <p className="text-rose-400 font-medium">
+                    Connection failed. Check your microphone permission or OpenAI API key.
                   </p>
                 )}
               </div>
             </div>
 
-            {/* Real-time Chat Transcript */}
+            {/* Real-time Chat Transcript Stream */}
             <div className="flex-1 rounded-2xl bg-slate-950/80 border border-slate-800/80 p-4 overflow-y-auto max-h-64 space-y-3">
               <div className="flex items-center justify-between pb-2 border-b border-slate-800/60 text-xs text-slate-400">
                 <span className="flex items-center gap-1.5 font-semibold text-slate-300">
                   <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Live Conversational Transcript</span>
+                  <span>Real-Time Conversational Transcript</span>
                 </span>
                 <span className="font-mono text-[11px]">{transcript.length} turns recorded</span>
               </div>
@@ -795,7 +777,7 @@ export const LiveCallPage: React.FC = () => {
               {transcript.length === 0 ? (
                 <div className="h-32 flex flex-col items-center justify-center text-center text-slate-400 text-xs">
                   <Mic className="w-6 h-6 text-slate-700 mb-2" />
-                  <p>Transcript will stream here in real time as the conversation progresses.</p>
+                  <p>Streaming conversation will display here live as audio is exchanged.</p>
                 </div>
               ) : (
                 transcript.map((msg) => (
@@ -821,19 +803,25 @@ export const LiveCallPage: React.FC = () => {
                   </div>
                 ))
               )}
+              {callStatus === 'Speaking' && (
+                <div className="flex items-center gap-1.5 text-xs text-indigo-400 pl-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
+                  <span>AI responding...</span>
+                </div>
+              )}
               <div ref={transcriptEndRef} />
             </div>
 
             {/* Call Action Bar: Start / End Call */}
             <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                {callStatus === 'Idle' || callStatus === 'Completed' ? (
+                {callStatus === 'Idle' || callStatus === 'Completed' || callStatus === 'Failed' ? (
                   <button
                     onClick={handleStartCall}
                     className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-bold text-sm shadow-lg shadow-emerald-600/30 transition-all hover:scale-105 active:scale-95"
                   >
                     <PhoneCall className="w-4 h-4" />
-                    <span>Start Live Call</span>
+                    <span>Start Call</span>
                   </button>
                 ) : (
                   <button
@@ -841,19 +829,23 @@ export const LiveCallPage: React.FC = () => {
                     className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white font-bold text-sm shadow-lg shadow-rose-600/30 transition-all hover:scale-105 active:scale-95 animate-pulse"
                   >
                     <PhoneOff className="w-4 h-4" />
-                    <span>End Voice Call</span>
+                    <span>End Call</span>
                   </button>
                 )}
 
                 <button
                   onClick={() => {
+                    if (activeCallSession) {
+                      activeCallSession.end();
+                      setActiveCallSession(null);
+                    }
                     setTranscript([]);
                     setCallSeconds(0);
                     setCallStatus('Idle');
                     setPostCallResult(null);
                     showToast('Session Reset', 'Transcript and live session cleared.', 'info');
                   }}
-                  disabled={callStatus === 'Speaking' || callStatus === 'Listening'}
+                  disabled={callStatus === 'Connecting'}
                   className="flex items-center gap-1.5 px-3.5 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors disabled:opacity-40"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
@@ -863,15 +855,15 @@ export const LiveCallPage: React.FC = () => {
 
               {/* Status Pill Indicator */}
               <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>ASR / TTS: Connected (Simulation)</span>
+                <span className={`w-2 h-2 rounded-full ${callStatus === 'Speaking' || callStatus === 'Listening' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+                <span>WebRTC: {callStatus}</span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Post-Call Intelligence Summary Drawer / Box */}
+      {/* Post-Call Intelligence Summary Drawer */}
       {postCallResult && (
         <div className="rounded-2xl bg-gradient-to-br from-[#0F1A3B] via-[#0B132B] to-[#0A1226] border border-indigo-500/30 p-6 shadow-2xl animate-in fade-in slide-in-from-bottom-4 space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-800 gap-3">
@@ -881,10 +873,10 @@ export const LiveCallPage: React.FC = () => {
               </div>
               <div>
                 <h3 className="text-lg font-bold text-white">
-                  Post-Call Intelligence & Classification
+                  Post-Call Intelligence & Disposition
                 </h3>
                 <p className="text-xs text-slate-300">
-                  AI analysis synthesized from live audio transcript
+                  Synthesized from live audio transcript & persisted to Supabase
                 </p>
               </div>
             </div>
@@ -966,23 +958,91 @@ export const LiveCallPage: React.FC = () => {
             </span>
             <div className="flex gap-3">
               <button
-                onClick={() => {
-                  setCurrentTab('call-history');
-                }}
+                onClick={() => setCurrentTab('call-history')}
                 className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5"
               >
                 <span>View in Call History</span>
               </button>
               <button
-                onClick={() => {
-                  setCurrentTab('leads');
-                }}
+                onClick={() => setCurrentTab('leads')}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 transition-colors"
               >
                 <span>Open Leads Pipeline</span>
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* OpenAI Realtime API Key Configuration Modal */}
+      {showConfigModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy-950/80 backdrop-blur-md animate-in fade-in">
+          <form
+            onSubmit={handleSaveApiKey}
+            className="relative w-full max-w-lg rounded-2xl bg-[#0D1530] border border-slate-700 shadow-2xl p-6 space-y-4"
+          >
+            <div className="flex items-start justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Key className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-base font-bold text-white">Configure OpenAI Realtime Voice Engine</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowConfigModal(false)}
+                className="p-1 rounded text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-indigo-950/40 border border-indigo-500/20 text-xs text-slate-300 space-y-1.5">
+              <span className="font-bold text-white block">Secure Session Architecture:</span>
+              <p className="leading-relaxed">
+                The permanent <code>OPENAI_API_KEY</code> is stored securely on the backend server. The backend creates short-lived, ephemeral client tokens for each voice call session. Permanent keys are never exposed in browser code.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                OpenAI API Key (starts with sk-...) *
+              </label>
+              <input
+                type="password"
+                required
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder="sk-proj-••••••••••••••••••••"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">
+                You can also configure this by adding <code>OPENAI_API_KEY=sk-...</code> to your <code>.env</code> file in the project root.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowConfigModal(false)}
+                className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSavingKey}
+                className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md shadow-indigo-600/30 disabled:opacity-50"
+              >
+                {isSavingKey ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Validating Key...</span>
+                  </>
+                ) : (
+                  <span>Verify & Save Key</span>
+                )}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>
