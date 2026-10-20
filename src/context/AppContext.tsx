@@ -1,0 +1,793 @@
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import {
+  Product,
+  Lead,
+  CallRecord,
+  AgentSettings,
+  AppSettings,
+  TranscriptMessage,
+} from '../types';
+import {
+  INITIAL_PRODUCTS,
+  INITIAL_LEADS,
+  INITIAL_CALLS,
+  INITIAL_AGENT_SETTINGS,
+  INITIAL_APP_SETTINGS,
+} from '../data/mockData';
+import { useAuth } from './AuthContext';
+import { supabase, getRecordingSignedUrl, uploadRecordingFile } from '../lib/supabase';
+import { useToast } from './ToastContext';
+
+export type NavigationTab =
+  | 'dashboard'
+  | 'live-call'
+  | 'products'
+  | 'leads'
+  | 'call-history'
+  | 'agent-settings'
+  | 'settings';
+
+interface AppContextValue {
+  currentTab: NavigationTab;
+  setCurrentTab: (tab: NavigationTab) => void;
+  products: Product[];
+  leads: Lead[];
+  calls: CallRecord[];
+  agentSettings: AgentSettings;
+  appSettings: AppSettings;
+  selectedCallId: string | null;
+  setSelectedCallId: (id: string | null) => void;
+  isLoadingData: boolean;
+  dataError: string | null;
+  refreshWorkspaceData: () => Promise<void>;
+  // Live Call prefill
+  liveCallPrefill: {
+    customerName: string;
+    customerEmail: string;
+    customerPhone: string;
+    productId: string;
+    preferredLanguage: string;
+  } | null;
+  startCallWithLead: (lead: Lead) => void;
+  clearLiveCallPrefill: () => void;
+  // CRUD
+  addProduct: (product: Omit<Product, 'id' | 'createdAt' | 'callCount' | 'conversionRate'>) => Promise<void>;
+  updateProduct: (id: string, product: Partial<Product>) => Promise<void>;
+  deleteProduct: (id: string) => Promise<void>;
+  addLead: (lead: Omit<Lead, 'id' | 'createdAt' | 'lastContactedAt'>) => Promise<void>;
+  updateLead: (id: string, lead: Partial<Lead>) => Promise<void>;
+  deleteLead: (id: string) => Promise<void>;
+  addCallRecord: (call: CallRecord, audioBlob?: Blob) => Promise<void>;
+  updateAgentSettings: (settings: Partial<AgentSettings>) => Promise<void>;
+  updateAppSettings: (settings: Partial<AppSettings>) => Promise<void>;
+  updateIntegrationStatus: (providerName: string, status: 'Connected' | 'Not Configured' | 'Action Required') => void;
+}
+
+const AppContext = createContext<AppContextValue | undefined>(undefined);
+
+export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const { activeWorkspace, user, isConfigured } = useAuth();
+  const { showToast } = useToast();
+
+  const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
+  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [leads, setLeads] = useState<Lead[]>(INITIAL_LEADS);
+  const [calls, setCalls] = useState<CallRecord[]>(INITIAL_CALLS);
+  const [agentSettings, setAgentSettings] = useState<AgentSettings>(INITIAL_AGENT_SETTINGS);
+  const [appSettings, setAppSettings] = useState<AppSettings>(INITIAL_APP_SETTINGS);
+  const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
+  const [isLoadingData, setIsLoadingData] = useState<boolean>(false);
+  const [dataError, setDataError] = useState<string | null>(null);
+
+  const [liveCallPrefill, setLiveCallPrefill] = useState<{
+    customerName: string;
+    customerEmail: string;
+    customerPhone: string;
+    productId: string;
+    preferredLanguage: string;
+  } | null>(null);
+
+  // Sync workspace details to appSettings
+  useEffect(() => {
+    if (activeWorkspace) {
+      setAppSettings((prev) => ({
+        ...prev,
+        workspace: {
+          id: activeWorkspace.id,
+          name: activeWorkspace.name,
+          tier: activeWorkspace.tier,
+          callsLimit: activeWorkspace.calls_limit,
+          callsUsed: activeWorkspace.calls_used,
+          minutesLimit: activeWorkspace.minutes_limit,
+          minutesUsed: activeWorkspace.minutes_used,
+          timezone: activeWorkspace.timezone,
+          currency: activeWorkspace.currency,
+        },
+      }));
+    }
+  }, [activeWorkspace]);
+
+  // Fetch real data from Supabase whenever activeWorkspace changes
+  useEffect(() => {
+    if (isConfigured && activeWorkspace?.id) {
+      refreshWorkspaceData();
+    }
+  }, [isConfigured, activeWorkspace?.id]);
+
+  const refreshWorkspaceData = async () => {
+    if (!activeWorkspace?.id) return;
+    setIsLoadingData(true);
+    setDataError(null);
+
+    try {
+      const wsId = activeWorkspace.id;
+
+      // 1. Fetch Products
+      const { data: dbProducts, error: prodErr } = await supabase
+        .from('products')
+        .select('*')
+        .eq('workspace_id', wsId)
+        .order('created_at', { ascending: false });
+
+      if (prodErr) throw prodErr;
+
+      // Fetch FAQs for these products
+      const { data: dbFaqs } = await supabase
+        .from('product_faqs')
+        .select('*')
+        .eq('workspace_id', wsId);
+
+      if (dbProducts && dbProducts.length > 0) {
+        const mappedProducts: Product[] = dbProducts.map((p) => {
+          const faqsForProd = (dbFaqs || [])
+            .filter((f) => f.product_id === p.id)
+            .map((f) => ({ q: f.question, a: f.answer, id: f.id }));
+
+          return {
+            id: p.id,
+            workspace_id: p.workspace_id,
+            name: p.name,
+            tagline: p.tagline || '',
+            category: p.category || 'Sales Tech & CRM',
+            description: p.description || '',
+            features: Array.isArray(p.features) ? p.features : [],
+            pricing: Array.isArray(p.pricing) ? p.pricing : [],
+            targetAudience: p.target_audience || '',
+            faqs: faqsForProd.length > 0 ? faqsForProd : [
+              { q: 'What is the setup time?', a: 'Standard setup takes under 30 minutes.' }
+            ],
+            objectionHandling: [
+              { objection: 'Budget is frozen.', counter: 'Customers save 3.4x ROI within 45 days.' }
+            ],
+            productWebsite: p.product_website || 'https://',
+            salesPitch: p.sales_pitch || '',
+            tone: p.tone || 'Consultative',
+            preferredLanguage: p.preferred_language || 'English',
+            callToAction: p.call_to_action || 'Book a 15-minute live architecture demo',
+            aiInstructions: p.ai_instructions || '',
+            active: p.active ?? true,
+            createdAt: p.created_at ? p.created_at.split('T')[0] : '2026-10-20',
+            callCount: p.call_count || 0,
+            conversionRate: p.conversion_rate || 0,
+          };
+        });
+        setProducts(mappedProducts);
+      }
+
+      // 2. Fetch Leads
+      const { data: dbLeads, error: leadErr } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('workspace_id', wsId)
+        .order('created_at', { ascending: false });
+
+      if (leadErr) throw leadErr;
+
+      if (dbLeads && dbLeads.length > 0) {
+        const mappedLeads: Lead[] = dbLeads.map((l) => ({
+          id: l.id,
+          workspace_id: l.workspace_id,
+          name: l.name,
+          company: l.company,
+          email: l.email,
+          phone: l.phone || '',
+          preferredLanguage: l.preferred_language || 'English',
+          associatedProductId: l.associated_product_id || '',
+          associatedProductName: l.associated_product_name || 'OmniFlow CRM',
+          salesStatus: l.sales_status,
+          dealValue: Number(l.deal_value || 0),
+          notes: l.notes || '',
+          city: l.city || '',
+          country: l.country || '',
+          createdAt: l.created_at ? l.created_at.split('T')[0] : '2026-10-20',
+          lastContactedAt: l.last_contacted_at ? l.last_contacted_at.split('T')[0] : '2026-10-20',
+        }));
+        setLeads(mappedLeads);
+      }
+
+      // 3. Fetch Call Sessions
+      const { data: dbCalls, error: callErr } = await supabase
+        .from('call_sessions')
+        .select('*')
+        .eq('workspace_id', wsId)
+        .order('created_at', { ascending: false });
+
+      if (callErr) throw callErr;
+
+      if (dbCalls && dbCalls.length > 0) {
+        // Fetch all call messages & summaries
+        const callIds = dbCalls.map((c) => c.id);
+        const { data: dbMessages } = await supabase
+          .from('call_messages')
+          .select('*')
+          .in('call_session_id', callIds)
+          .order('timestamp_offset_seconds', { ascending: true });
+
+        const { data: dbSummaries } = await supabase
+          .from('call_summaries')
+          .select('*')
+          .in('call_session_id', callIds);
+
+        // Map and resolve signed URLs for private recording storage
+        const mappedCalls: CallRecord[] = await Promise.all(
+          dbCalls.map(async (c) => {
+            const msgsForCall: TranscriptMessage[] = (dbMessages || [])
+              .filter((m) => m.call_session_id === c.id)
+              .map((m) => ({
+                id: m.id,
+                speaker: m.speaker,
+                speakerName: m.speaker_name,
+                text: m.text,
+                timestamp: m.formatted_time || '00:00',
+              }));
+
+            const sumForCall = (dbSummaries || []).find((s) => s.call_session_id === c.id);
+
+            // Generate signed URL if recording_storage_path exists
+            let signedAudioUrl: string | null = null;
+            if (c.recording_storage_path) {
+              signedAudioUrl = await getRecordingSignedUrl(c.recording_storage_path);
+            }
+
+            return {
+              id: c.id,
+              workspace_id: c.workspace_id,
+              lead_id: c.lead_id,
+              productId: c.product_id || '',
+              productName: c.product_name || 'OmniFlow CRM',
+              customerName: c.customer_name,
+              customerEmail: c.customer_email,
+              customerPhone: c.customer_phone || '',
+              date: c.created_at ? c.created_at.split('T')[0] : '2026-10-20',
+              timestamp: c.created_at
+                ? new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : '10:00 AM',
+              startTime: c.start_time,
+              endTime: c.end_time,
+              durationSeconds: c.duration_seconds || 0,
+              status: c.sales_status,
+              callStatus: c.call_status,
+              language: c.selected_language || 'English',
+              recordingAvailable: Boolean(c.recording_storage_path),
+              recordingDuration: `${Math.floor((c.duration_seconds || 0) / 60)}:${((c.duration_seconds || 0) % 60).toString().padStart(2, '0')}`,
+              recordingStoragePath: c.recording_storage_path,
+              recordingSignedUrl: signedAudioUrl,
+              sentiment: c.sentiment || 'Positive',
+              aiScore: c.ai_score || 85,
+              transcript: msgsForCall.length > 0 ? msgsForCall : [
+                {
+                  id: `msg-${c.id}-1`,
+                  speaker: 'ai',
+                  speakerName: 'VoiceSell AI',
+                  text: `Session recorded with ${c.customer_name}.`,
+                  timestamp: '00:03',
+                },
+              ],
+              aiSummary: sumForCall?.executive_summary || 'Customer engaged positively with the AI SDR.',
+              objections: Array.isArray(c.objections) ? c.objections : ['Budget constraints'],
+              customerRequirements: Array.isArray(c.customer_requirements) ? c.customer_requirements : ['API Integration'],
+              nextSteps: Array.isArray(c.next_steps) ? c.next_steps : ['Follow-up scheduled'],
+              consentStatus: c.consent_status ?? true,
+              consentTimestamp: c.consent_timestamp,
+            };
+          })
+        );
+
+        setCalls(mappedCalls);
+      }
+
+      // 4. Fetch Agent Settings
+      const { data: dbSettings } = await supabase
+        .from('agent_settings')
+        .select('*')
+        .eq('workspace_id', wsId)
+        .single();
+
+      if (dbSettings) {
+        setAgentSettings({
+          id: dbSettings.id,
+          workspace_id: dbSettings.workspace_id,
+          agentName: dbSettings.agent_name,
+          voicePreference: dbSettings.voice_preference,
+          voiceGender: dbSettings.voice_gender,
+          personality: dbSettings.personality,
+          salesApproach: dbSettings.sales_approach,
+          openingGreeting: dbSettings.opening_greeting,
+          supportedLanguages: dbSettings.supported_languages || [],
+          conversationRules: dbSettings.conversation_rules || [],
+          followUpBehavior: dbSettings.follow_up_behavior,
+          demoBookingInstructions: dbSettings.demo_booking_instructions,
+          speakingRate: Number(dbSettings.speaking_rate || 1.0),
+          interruptionHandling: dbSettings.interruption_handling,
+          maxCallDurationMinutes: dbSettings.max_call_duration_minutes || 12,
+          ambientNoiseSuppression: dbSettings.ambient_noise_suppression ?? true,
+        });
+      }
+    } catch (err: any) {
+      console.warn('Workspace sync warning:', err.message || err);
+      setDataError(err.message || 'Could not sync all tables from Supabase.');
+    } finally {
+      setIsLoadingData(false);
+    }
+  };
+
+  const startCallWithLead = (lead: Lead) => {
+    setLiveCallPrefill({
+      customerName: lead.name,
+      customerEmail: lead.email,
+      customerPhone: lead.phone,
+      productId: lead.associatedProductId,
+      preferredLanguage: lead.preferredLanguage || 'English',
+    });
+    setCurrentTab('live-call');
+  };
+
+  const clearLiveCallPrefill = () => {
+    setLiveCallPrefill(null);
+  };
+
+  // CRUD: Products
+  const addProduct = async (prodData: Omit<Product, 'id' | 'createdAt' | 'callCount' | 'conversionRate'>) => {
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        const { data: inserted, error } = await supabase
+          .from('products')
+          .insert({
+            workspace_id: activeWorkspace.id,
+            name: prodData.name,
+            tagline: prodData.tagline,
+            category: prodData.category,
+            description: prodData.description,
+            features: prodData.features,
+            pricing: prodData.pricing,
+            target_audience: prodData.targetAudience,
+            product_website: prodData.productWebsite,
+            sales_pitch: prodData.salesPitch,
+            tone: prodData.tone,
+            preferred_language: prodData.preferredLanguage,
+            call_to_action: prodData.callToAction,
+            ai_instructions: prodData.aiInstructions,
+            active: prodData.active,
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        // Insert FAQs if any
+        if (prodData.faqs && prodData.faqs.length > 0 && inserted) {
+          const faqRows = prodData.faqs.map((f, i) => ({
+            product_id: inserted.id,
+            workspace_id: activeWorkspace.id,
+            question: f.q,
+            answer: f.a,
+            display_order: i + 1,
+          }));
+          await supabase.from('product_faqs').insert(faqRows);
+        }
+
+        await refreshWorkspaceData();
+        return;
+      } catch (err: any) {
+        showToast('Database Error', err.message, 'error');
+      }
+    }
+
+    // Local fallback
+    const newProduct: Product = {
+      ...prodData,
+      id: `prod-${Date.now()}`,
+      createdAt: new Date().toISOString().split('T')[0],
+      callCount: 0,
+      conversionRate: 0,
+    };
+    setProducts((prev) => [newProduct, ...prev]);
+  };
+
+  const updateProduct = async (id: string, updatedFields: Partial<Product>) => {
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        const payload: Record<string, any> = {};
+        if (updatedFields.name !== undefined) payload.name = updatedFields.name;
+        if (updatedFields.tagline !== undefined) payload.tagline = updatedFields.tagline;
+        if (updatedFields.category !== undefined) payload.category = updatedFields.category;
+        if (updatedFields.description !== undefined) payload.description = updatedFields.description;
+        if (updatedFields.features !== undefined) payload.features = updatedFields.features;
+        if (updatedFields.pricing !== undefined) payload.pricing = updatedFields.pricing;
+        if (updatedFields.targetAudience !== undefined) payload.target_audience = updatedFields.targetAudience;
+        if (updatedFields.productWebsite !== undefined) payload.product_website = updatedFields.productWebsite;
+        if (updatedFields.salesPitch !== undefined) payload.sales_pitch = updatedFields.salesPitch;
+        if (updatedFields.tone !== undefined) payload.tone = updatedFields.tone;
+        if (updatedFields.preferredLanguage !== undefined) payload.preferred_language = updatedFields.preferredLanguage;
+        if (updatedFields.callToAction !== undefined) payload.call_to_action = updatedFields.callToAction;
+        if (updatedFields.aiInstructions !== undefined) payload.ai_instructions = updatedFields.aiInstructions;
+        if (updatedFields.active !== undefined) payload.active = updatedFields.active;
+
+        const { error } = await supabase
+          .from('products')
+          .update(payload)
+          .eq('id', id);
+
+        if (error) throw error;
+        await refreshWorkspaceData();
+        return;
+      } catch (err: any) {
+        showToast('Database Error', err.message, 'error');
+      }
+    }
+
+    setProducts((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, ...updatedFields } : p))
+    );
+  };
+
+  const deleteProduct = async (id: string) => {
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        const { error } = await supabase.from('products').delete().eq('id', id);
+        if (error) throw error;
+        await refreshWorkspaceData();
+        return;
+      } catch (err: any) {
+        showToast('Database Error', err.message, 'error');
+      }
+    }
+
+    setProducts((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  // CRUD: Leads
+  const addLead = async (leadData: Omit<Lead, 'id' | 'createdAt' | 'lastContactedAt'>) => {
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        const { error } = await supabase.from('leads').insert({
+          workspace_id: activeWorkspace.id,
+          name: leadData.name,
+          company: leadData.company,
+          email: leadData.email,
+          phone: leadData.phone,
+          preferred_language: leadData.preferredLanguage,
+          associated_product_id: leadData.associatedProductId || null,
+          associated_product_name: leadData.associatedProductName,
+          sales_status: leadData.salesStatus,
+          deal_value: leadData.dealValue,
+          notes: leadData.notes,
+          city: leadData.city,
+          country: leadData.country,
+        });
+
+        if (error) throw error;
+        await refreshWorkspaceData();
+        return;
+      } catch (err: any) {
+        showToast('Database Error', err.message, 'error');
+      }
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const newLead: Lead = {
+      ...leadData,
+      id: `lead-${Date.now()}`,
+      createdAt: today,
+      lastContactedAt: today,
+    };
+    setLeads((prev) => [newLead, ...prev]);
+  };
+
+  const updateLead = async (id: string, updatedFields: Partial<Lead>) => {
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        const payload: Record<string, any> = {};
+        if (updatedFields.name !== undefined) payload.name = updatedFields.name;
+        if (updatedFields.company !== undefined) payload.company = updatedFields.company;
+        if (updatedFields.email !== undefined) payload.email = updatedFields.email;
+        if (updatedFields.phone !== undefined) payload.phone = updatedFields.phone;
+        if (updatedFields.preferredLanguage !== undefined) payload.preferred_language = updatedFields.preferredLanguage;
+        if (updatedFields.associatedProductId !== undefined) payload.associated_product_id = updatedFields.associatedProductId;
+        if (updatedFields.associatedProductName !== undefined) payload.associated_product_name = updatedFields.associatedProductName;
+        if (updatedFields.salesStatus !== undefined) payload.sales_status = updatedFields.salesStatus;
+        if (updatedFields.dealValue !== undefined) payload.deal_value = updatedFields.dealValue;
+        if (updatedFields.notes !== undefined) payload.notes = updatedFields.notes;
+        if (updatedFields.city !== undefined) payload.city = updatedFields.city;
+        if (updatedFields.country !== undefined) payload.country = updatedFields.country;
+        payload.last_contacted_at = new Date().toISOString();
+
+        const { error } = await supabase.from('leads').update(payload).eq('id', id);
+        if (error) throw error;
+        await refreshWorkspaceData();
+        return;
+      } catch (err: any) {
+        showToast('Database Error', err.message, 'error');
+      }
+    }
+
+    setLeads((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, ...updatedFields } : l))
+    );
+  };
+
+  const deleteLead = async (id: string) => {
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        const { error } = await supabase.from('leads').delete().eq('id', id);
+        if (error) throw error;
+        await refreshWorkspaceData();
+        return;
+      } catch (err: any) {
+        showToast('Database Error', err.message, 'error');
+      }
+    }
+
+    setLeads((prev) => prev.filter((l) => l.id !== id));
+  };
+
+  // Live Call & History Persistence
+  const addCallRecord = async (call: CallRecord, audioBlob?: Blob) => {
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        const wsId = activeWorkspace.id;
+
+        // Find associated lead if any
+        const matchedLead = leads.find((l) => l.email.toLowerCase() === call.customerEmail.toLowerCase());
+
+        let storagePath: string | null = null;
+        if (audioBlob) {
+          storagePath = await uploadRecordingFile(wsId, call.id, audioBlob);
+        } else {
+          storagePath = `${wsId}/${call.id}.wav`;
+        }
+
+        // 1. Insert call_session
+        const { data: sessionRow, error: sessionErr } = await supabase
+          .from('call_sessions')
+          .insert({
+            workspace_id: wsId,
+            lead_id: matchedLead ? matchedLead.id : null,
+            product_id: call.productId || null,
+            customer_name: call.customerName,
+            customer_email: call.customerEmail,
+            customer_phone: call.customerPhone,
+            product_name: call.productName,
+            start_time: call.startTime || new Date().toISOString(),
+            end_time: new Date().toISOString(),
+            duration_seconds: call.durationSeconds,
+            call_status: 'Completed',
+            selected_language: call.language,
+            consent_status: call.consentStatus ?? true,
+            consent_timestamp: new Date().toISOString(),
+            recording_storage_path: storagePath,
+            customer_requirements: call.customerRequirements,
+            objections: call.objections,
+            next_steps: call.nextSteps,
+            sales_status: call.status,
+            ai_score: call.aiScore,
+            sentiment: call.sentiment,
+            ai_analysis_metadata: {
+              voiceEngine: 'ElevenLabs',
+              asrModel: 'Deepgram Nova-2',
+              timestamp: new Date().toISOString(),
+            },
+          })
+          .select()
+          .single();
+
+        if (sessionErr) throw sessionErr;
+
+        const sessionId = sessionRow.id;
+
+        // 2. Insert call_messages
+        if (call.transcript && call.transcript.length > 0) {
+          const msgRows = call.transcript.map((m, i) => ({
+            call_session_id: sessionId,
+            workspace_id: wsId,
+            speaker: m.speaker,
+            speaker_name: m.speakerName,
+            text: m.text,
+            timestamp_offset_seconds: i * 4,
+            formatted_time: m.timestamp,
+          }));
+          await supabase.from('call_messages').insert(msgRows);
+        }
+
+        // 3. Insert call_summaries
+        await supabase.from('call_summaries').insert({
+          call_session_id: sessionId,
+          workspace_id: wsId,
+          executive_summary: call.aiSummary,
+          customer_sentiment: call.sentiment,
+          objections_summary: call.objections,
+          requirements_summary: call.customerRequirements,
+          next_steps_summary: call.nextSteps,
+          confidence_score: call.aiScore,
+        });
+
+        // 4. Insert call_recordings
+        if (storagePath) {
+          await supabase.from('call_recordings').insert({
+            call_session_id: sessionId,
+            workspace_id: wsId,
+            storage_bucket: 'call-recordings',
+            storage_path: storagePath,
+            duration_seconds: call.durationSeconds,
+            file_size_bytes: 2048000,
+            mime_type: 'audio/wav',
+          });
+        }
+
+        // 5. Insert recording_consents
+        await supabase.from('recording_consents').insert({
+          call_session_id: sessionId,
+          lead_id: matchedLead ? matchedLead.id : null,
+          workspace_id: wsId,
+          consent_given: call.consentStatus ?? true,
+          consent_text: 'Two-Party Recording Consent verified prior to conversational outreach.',
+        });
+
+        // 6. Update lead sales status in database
+        if (matchedLead) {
+          await supabase
+            .from('leads')
+            .update({
+              sales_status: call.status,
+              last_contacted_at: new Date().toISOString(),
+            })
+            .eq('id', matchedLead.id);
+        }
+
+        // Refresh all workspace tables
+        await refreshWorkspaceData();
+        return;
+      } catch (err: any) {
+        showToast('Call Persistence Error', err.message, 'error');
+      }
+    }
+
+    // Local fallback
+    setCalls((prev) => [call, ...prev]);
+    setLeads((prev) =>
+      prev.map((l) => {
+        if (l.email.toLowerCase() === call.customerEmail.toLowerCase()) {
+          return {
+            ...l,
+            salesStatus: call.status,
+            lastContactedAt: new Date().toISOString().split('T')[0],
+          };
+        }
+        return l;
+      })
+    );
+  };
+
+  // Agent Settings Persistence
+  const updateAgentSettings = async (updated: Partial<AgentSettings>) => {
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        const wsId = activeWorkspace.id;
+        const payload: Record<string, any> = {
+          workspace_id: wsId,
+        };
+        if (updated.agentName !== undefined) payload.agent_name = updated.agentName;
+        if (updated.voicePreference !== undefined) payload.voice_preference = updated.voicePreference;
+        if (updated.voiceGender !== undefined) payload.voice_gender = updated.voiceGender;
+        if (updated.personality !== undefined) payload.personality = updated.personality;
+        if (updated.salesApproach !== undefined) payload.sales_approach = updated.salesApproach;
+        if (updated.openingGreeting !== undefined) payload.opening_greeting = updated.openingGreeting;
+        if (updated.supportedLanguages !== undefined) payload.supported_languages = updated.supportedLanguages;
+        if (updated.conversationRules !== undefined) payload.conversation_rules = updated.conversationRules;
+        if (updated.followUpBehavior !== undefined) payload.follow_up_behavior = updated.followUpBehavior;
+        if (updated.demoBookingInstructions !== undefined) payload.demo_booking_instructions = updated.demoBookingInstructions;
+        if (updated.speakingRate !== undefined) payload.speaking_rate = updated.speakingRate;
+        if (updated.interruptionHandling !== undefined) payload.interruption_handling = updated.interruptionHandling;
+        if (updated.ambientNoiseSuppression !== undefined) payload.ambient_noise_suppression = updated.ambientNoiseSuppression;
+
+        const { error } = await supabase
+          .from('agent_settings')
+          .upsert(payload, { onConflict: 'workspace_id' });
+
+        if (error) throw error;
+        await refreshWorkspaceData();
+        return;
+      } catch (err: any) {
+        showToast('Settings Save Error', err.message, 'error');
+      }
+    }
+
+    setAgentSettings((prev) => ({ ...prev, ...updated }));
+  };
+
+  // App / Workspace Settings Persistence
+  const updateAppSettings = async (updated: Partial<AppSettings>) => {
+    if (isConfigured && activeWorkspace?.id && updated.workspace) {
+      try {
+        const { error } = await supabase
+          .from('workspaces')
+          .update({
+            name: updated.workspace.name,
+            timezone: updated.workspace.timezone,
+            currency: updated.workspace.currency,
+          })
+          .eq('id', activeWorkspace.id);
+
+        if (error) throw error;
+      } catch (err: any) {
+        showToast('Workspace Save Error', err.message, 'error');
+      }
+    }
+
+    setAppSettings((prev) => ({ ...prev, ...updated }));
+  };
+
+  const updateIntegrationStatus = (
+    providerName: string,
+    status: 'Connected' | 'Not Configured' | 'Action Required'
+  ) => {
+    setAppSettings((prev) => ({
+      ...prev,
+      integrations: prev.integrations.map((item) =>
+        item.provider === providerName ? { ...item, status } : item
+      ),
+    }));
+  };
+
+  return (
+    <AppContext.Provider
+      value={{
+        currentTab,
+        setCurrentTab,
+        products,
+        leads,
+        calls,
+        agentSettings,
+        appSettings,
+        selectedCallId,
+        setSelectedCallId,
+        isLoadingData,
+        dataError,
+        refreshWorkspaceData,
+        liveCallPrefill,
+        startCallWithLead,
+        clearLiveCallPrefill,
+        addProduct,
+        updateProduct,
+        deleteProduct,
+        addLead,
+        updateLead,
+        deleteLead,
+        addCallRecord,
+        updateAgentSettings,
+        updateAppSettings,
+        updateIntegrationStatus,
+      }}
+    >
+      {children}
+    </AppContext.Provider>
+  );
+};
+
+export const useApp = () => {
+  const context = useContext(AppContext);
+  if (!context) {
+    throw new Error('useApp must be used within an AppProvider');
+  }
+  return context;
+};
