@@ -24,11 +24,19 @@ import {
   Sliders,
   Check,
   RefreshCw,
+  Trash2,
   LogOut
 } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
-  const { appSettings, updateAppSettings, updateIntegrationStatus, refreshWorkspaceData, isLoadingData } = useApp();
+  const {
+    appSettings,
+    updateAppSettings,
+    updateIntegrationStatus,
+    refreshWorkspaceData,
+    isLoadingData,
+    purgeExpiredRecords,
+  } = useApp();
   const { isConfigured, saveConnectionConfig, disconnectConnection, user, activeWorkspace, memberRole } = useAuth();
   const { showToast } = useToast();
 
@@ -40,19 +48,20 @@ export const SettingsPage: React.FC = () => {
   const [profileForm, setProfileForm] = useState({ ...appSettings.profile });
   const [workspaceForm, setWorkspaceForm] = useState({ ...appSettings.workspace });
   const [privacyForm, setPrivacyForm] = useState({ ...appSettings.privacy });
+  const [isPurging, setIsPurging] = useState(false);
 
   // Integration config modal
   const [selectedIntegration, setSelectedIntegration] = useState<IntegrationConfig | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [apiSecretInput, setApiSecretInput] = useState('');
 
-  // Check OpenAI Realtime status from backend
+  // Check Ollama Cloud status from backend
   React.useEffect(() => {
-    fetch('/api/realtime-status')
+    fetch('/api/ollama-status')
       .then((r) => r.json())
       .then((data) => {
         if (data.configured) {
-          updateIntegrationStatus('OpenAI Realtime', 'Connected');
+          updateIntegrationStatus('Ollama Cloud', 'Connected');
         }
       })
       .catch(() => {});
@@ -90,21 +99,21 @@ export const SettingsPage: React.FC = () => {
       return;
     }
 
-    // If configuring OpenAI Realtime, save to backend endpoint and verify
-    if (selectedIntegration.provider === 'OpenAI Realtime') {
+    // If configuring Ollama Cloud, save to backend endpoint and verify
+    if (selectedIntegration.provider === 'Ollama Cloud') {
       try {
-        const resp = await fetch('/api/save-openai-key', {
+        const resp = await fetch('/api/save-ollama-config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ apiKey: apiKeyInput.trim() }),
         });
         const data = await resp.json();
         if (!resp.ok || !data.ok) {
-          showToast('Verification Failed', data.error || 'Failed to authenticate OpenAI key', 'error');
+          showToast('Verification Failed', data.error || 'Failed to authenticate Ollama Cloud key', 'error');
           return;
         }
-        updateIntegrationStatus('OpenAI Realtime', 'Connected');
-        showToast('OpenAI Realtime Connected', 'Permanent API key stored securely on backend. Live WebRTC voice sessions enabled.', 'success');
+        updateIntegrationStatus('Ollama Cloud', 'Connected');
+        showToast('Ollama Cloud Connected', `API key stored securely on backend. Active model: ${data.model || 'llama3.3'}`, 'success');
         setSelectedIntegration(null);
         return;
       } catch (e: any) {
@@ -306,9 +315,9 @@ export const SettingsPage: React.FC = () => {
           <div className="p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/20 text-xs text-slate-300 flex items-start gap-3">
             <Radio className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
             <div>
-              <span className="font-semibold text-white">Stage 1 Integration Transparency:</span>
+              <span className="font-semibold text-white">Integration Transparency:</span>
               <p className="mt-0.5 text-slate-300 leading-relaxed">
-                As required by Stage 1 specifications, actual real-time voice calls and AI persistence are simulated. Below, you can inspect and configure credentials for ElevenLabs, OpenAI Realtime, Deepgram, Twilio, HubSpot, and Salesforce. Buttons indicate their exact configuration status.
+                VoiceSell AI uses Ollama Cloud (`https://ollama.com/api/chat`) for real SDR intelligence paired with browser-native Web Speech recognition and synthesis. Below, you can inspect and configure credentials for Ollama Cloud, ElevenLabs, Deepgram, Twilio, HubSpot, and Salesforce.
               </p>
             </div>
           </div>
@@ -521,6 +530,48 @@ export const SettingsPage: React.FC = () => {
                 <span>90 Days (Recommended)</span>
                 <span>365 Days (Annual Audit)</span>
               </div>
+            </div>
+
+            {/* Retention Purge Action Box */}
+            <div className="p-4 rounded-xl bg-rose-950/20 border border-rose-500/20 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <span className="font-semibold text-rose-300 block">
+                  Enforce Data Deletion & Retention Purge
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  Immediately purges all call sessions, recordings, and transcripts older than {privacyForm.dataRetentionDays} days across your workspace.
+                </span>
+              </div>
+              <button
+                type="button"
+                disabled={isPurging}
+                onClick={async () => {
+                  if (
+                    !confirm(
+                      `Permanently purge all voice recordings and transcripts older than ${privacyForm.dataRetentionDays} days? This action cannot be undone.`
+                    )
+                  ) {
+                    return;
+                  }
+                  setIsPurging(true);
+                  try {
+                    const result = await purgeExpiredRecords(privacyForm.dataRetentionDays);
+                    if (result.success) {
+                      showToast('Retention Purge Complete', result.message, 'success');
+                    } else {
+                      showToast('Purge Error', result.message, 'error');
+                    }
+                  } catch (e: any) {
+                    showToast('Purge Error', e.message, 'error');
+                  } finally {
+                    setIsPurging(false);
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600 border border-rose-500/30 text-rose-200 hover:text-white font-semibold text-xs transition-colors shrink-0 flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isPurging ? 'Purging Records...' : `Purge Records > ${privacyForm.dataRetentionDays}d`}</span>
+              </button>
             </div>
 
             <div className="flex justify-end pt-3 border-t border-slate-800">

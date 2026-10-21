@@ -1,11 +1,11 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { realtimeServerPlugin } from './server/realtimePlugin';
+import { ollamaServerPlugin } from './server/ollamaPlugin';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react(), realtimeServerPlugin()],
+  plugins: [react(), ollamaServerPlugin()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

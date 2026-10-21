@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { useToast } from '../../context/ToastContext';
 import { StatusBadge } from '../common/StatusBadge';
 import { Lead, SalesStatus } from '../../types';
-import { formatCurrency } from '../../utils/cn';
+import { formatCurrency, formatDuration } from '../../utils/cn';
 import { SUPPORTED_LANGUAGES } from '../../data/mockData';
 import {
   Users,
@@ -24,11 +24,29 @@ import {
   ChevronDown,
   ArrowUpDown,
   Sparkles,
-  CheckCircle2
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Disc,
+  ListTodo,
+  Check
 } from 'lucide-react';
 
 export const LeadsPage: React.FC = () => {
-  const { leads, products, addLead, updateLead, deleteLead, startCallWithLead } = useApp();
+  const {
+    leads,
+    products,
+    calls,
+    followUpTasks,
+    addLead,
+    updateLead,
+    deleteLead,
+    startCallWithLead,
+    setSelectedCallId,
+    setCurrentTab,
+    markTaskComplete,
+  } = useApp();
   const { showToast } = useToast();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -36,6 +54,10 @@ export const LeadsPage: React.FC = () => {
   const [productFilter, setProductFilter] = useState<string>('All');
   const [sortBy, setSortBy] = useState<'name' | 'dealValue' | 'date'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   // Modal / Drawer state
   const [selectedLeadForDetail, setSelectedLeadForDetail] = useState<Lead | null>(null);
@@ -92,6 +114,13 @@ export const LeadsPage: React.FC = () => {
       }
       return sortOrder === 'asc' ? comparison : -comparison;
     });
+
+  // Pagination calculation
+  const totalLeads = filteredLeads.length;
+  const totalPages = Math.max(1, Math.ceil(totalLeads / pageSize));
+  const effectivePage = Math.min(currentPage, totalPages);
+  const startIndex = (effectivePage - 1) * pageSize;
+  const paginatedLeads = filteredLeads.slice(startIndex, startIndex + pageSize);
 
   const resetForm = () => {
     setFormData({
@@ -319,14 +348,14 @@ export const LeadsPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
-              {filteredLeads.length === 0 ? (
+              {paginatedLeads.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-slate-400">
                     No leads found matching current search or filters.
                   </td>
                 </tr>
               ) : (
-                filteredLeads.map((lead) => (
+                paginatedLeads.map((lead) => (
                   <tr
                     key={lead.id}
                     onClick={() => setSelectedLeadForDetail(lead)}
@@ -433,146 +462,385 @@ export const LeadsPage: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Bar */}
+        <div className="p-4 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-400">
+          <div className="flex items-center gap-3">
+            <span>
+              Showing {totalLeads === 0 ? 0 : startIndex + 1} to{' '}
+              {Math.min(startIndex + pageSize, totalLeads)} of {totalLeads} leads
+            </span>
+
+            <div className="flex items-center gap-1.5">
+              <span>Per page:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-slate-200"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={effectivePage <= 1}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40 transition-colors"
+              title="Previous page"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="font-mono text-slate-300 px-2">
+              Page {effectivePage} of {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={effectivePage >= totalPages}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40 transition-colors"
+              title="Next page"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Lead Detail Drawer / Modal */}
-      {selectedLeadForDetail && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy-950/80 backdrop-blur-md animate-in fade-in">
-          <div className="relative w-full max-w-xl rounded-2xl bg-[#0D1530] border border-slate-700 shadow-2xl p-6 overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="flex items-start justify-between pb-4 border-b border-slate-800">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center text-white font-bold text-lg">
-                  {selectedLeadForDetail.name.charAt(0)}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-lg font-bold text-white">
-                      {selectedLeadForDetail.name}
-                    </h3>
-                    <StatusBadge status={selectedLeadForDetail.salesStatus} size="sm" />
-                  </div>
-                  <p className="text-xs text-slate-400">
-                    {selectedLeadForDetail.company} • {selectedLeadForDetail.city || 'Global'}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedLeadForDetail(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Lead Detail Drawer / Modal with Linked Calls & Associated Product */}
+      {selectedLeadForDetail && (() => {
+        const associatedProd = products.find(
+          (p) =>
+            p.id === selectedLeadForDetail.associatedProductId ||
+            p.name === selectedLeadForDetail.associatedProductName
+        );
 
-            <div className="flex-1 overflow-y-auto py-4 space-y-4 text-xs">
-              {/* Quick Stat Pill Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                  <span className="text-slate-400 block mb-0.5">Target SaaS</span>
-                  <span className="font-semibold text-slate-200">
-                    {selectedLeadForDetail.associatedProductName}
-                  </span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                  <span className="text-slate-400 block mb-0.5">Preferred Dialect</span>
-                  <span className="font-semibold text-slate-200">
-                    {selectedLeadForDetail.preferredLanguage}
-                  </span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                  <span className="text-slate-400 block mb-0.5">Deal Estimate</span>
-                  <span className="font-bold text-emerald-400 font-mono">
-                    {formatCurrency(selectedLeadForDetail.dealValue)}
-                  </span>
-                </div>
-              </div>
+        const linkedCalls = calls.filter(
+          (c) =>
+            (selectedLeadForDetail.email &&
+              c.customerEmail.toLowerCase() === selectedLeadForDetail.email.toLowerCase()) ||
+            (c.lead_id && c.lead_id === selectedLeadForDetail.id)
+        );
 
-              {/* Contact Information */}
-              <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
-                <span className="font-semibold text-slate-300 block uppercase tracking-wider text-[11px]">
-                  Contact Information
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-300">
-                  <div className="flex items-center gap-2">
-                    <Mail className="w-4 h-4 text-slate-400" />
-                    <span>{selectedLeadForDetail.email}</span>
+        const linkedTasks = followUpTasks.filter(
+          (t) =>
+            (selectedLeadForDetail.email &&
+              t.customerEmail &&
+              t.customerEmail.toLowerCase() === selectedLeadForDetail.email.toLowerCase()) ||
+            (t.lead_id && t.lead_id === selectedLeadForDetail.id)
+        );
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy-950/80 backdrop-blur-md animate-in fade-in">
+            <div className="relative w-full max-w-3xl rounded-2xl bg-[#0D1530] border border-slate-700 shadow-2xl p-6 overflow-hidden max-h-[92vh] flex flex-col">
+              {/* Header */}
+              <div className="flex items-start justify-between pb-4 border-b border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center text-white font-bold text-lg">
+                    {selectedLeadForDetail.name.charAt(0)}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-4 h-4 text-slate-400" />
-                    <span>{selectedLeadForDetail.phone}</span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-bold text-white">
+                        {selectedLeadForDetail.name}
+                      </h3>
+                      <StatusBadge status={selectedLeadForDetail.salesStatus} size="sm" />
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      {selectedLeadForDetail.company} • {selectedLeadForDetail.city || 'Global'} ({selectedLeadForDetail.country || 'Global'})
+                    </p>
                   </div>
                 </div>
-              </div>
-
-              {/* SDR & Qualification Notes */}
-              <div className="p-3.5 rounded-xl bg-indigo-950/30 border border-indigo-500/20">
-                <span className="font-semibold text-indigo-300 block uppercase tracking-wider text-[11px] mb-1">
-                  AI Qualification & SDR Notes
-                </span>
-                <p className="text-slate-200 leading-relaxed">
-                  {selectedLeadForDetail.notes || 'No qualification notes recorded yet.'}
-                </p>
-              </div>
-
-              {/* Status Update Quick Selector */}
-              <div>
-                <label className="block font-semibold text-slate-300 mb-1.5">
-                  Update Lead Sales Status
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {allStatuses.map((st) => (
-                    <button
-                      key={st}
-                      type="button"
-                      onClick={() => {
-                        updateLead(selectedLeadForDetail.id, { salesStatus: st });
-                        setSelectedLeadForDetail({
-                          ...selectedLeadForDetail,
-                          salesStatus: st,
-                        });
-                        showToast('Status Updated', `${selectedLeadForDetail.name} marked as ${st}.`, 'success');
-                      }}
-                      className={`p-2 rounded-xl border text-xs font-medium text-left transition-all ${
-                        selectedLeadForDetail.salesStatus === st
-                          ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-sm'
-                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {st}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
-              <span className="text-xs text-slate-400 font-mono">
-                Created: {selectedLeadForDetail.createdAt}
-              </span>
-
-              <div className="flex gap-2">
                 <button
                   onClick={() => setSelectedLeadForDetail(null)}
-                  className="px-3 py-1.5 rounded-xl text-xs text-slate-300 hover:bg-slate-800"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
                 >
-                  Close
+                  <X className="w-5 h-5" />
                 </button>
-                <button
-                  onClick={() => {
-                    const l = selectedLeadForDetail;
-                    setSelectedLeadForDetail(null);
-                    startCallWithLead(l);
-                  }}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5"
-                >
-                  <PhoneCall className="w-3.5 h-3.5" />
-                  <span>Launch Live Voice Call</span>
-                </button>
+              </div>
+
+              {/* Drawer Scrollable Body */}
+              <div className="flex-1 overflow-y-auto py-4 space-y-4 text-xs pr-1">
+                {/* Quick Stat Pill Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                    <span className="text-slate-400 block mb-0.5 text-[11px]">Target SaaS</span>
+                    <span className="font-semibold text-slate-200 truncate block">
+                      {selectedLeadForDetail.associatedProductName}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                    <span className="text-slate-400 block mb-0.5 text-[11px]">Language</span>
+                    <span className="font-semibold text-slate-200">
+                      {selectedLeadForDetail.preferredLanguage}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                    <span className="text-slate-400 block mb-0.5 text-[11px]">Deal Value</span>
+                    <span className="font-bold text-emerald-400 font-mono">
+                      {formatCurrency(selectedLeadForDetail.dealValue)}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                    <span className="text-slate-400 block mb-0.5 text-[11px]">Voice Calls</span>
+                    <span className="font-bold text-indigo-400 font-mono">
+                      {linkedCalls.length} logged
+                    </span>
+                  </div>
+                </div>
+
+                {/* Contact Information */}
+                <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+                  <span className="font-semibold text-slate-300 block uppercase tracking-wider text-[11px]">
+                    Direct Contact Details
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-300">
+                    <div className="flex items-center gap-2">
+                      <Mail className="w-4 h-4 text-slate-400" />
+                      <span>{selectedLeadForDetail.email}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Phone className="w-4 h-4 text-slate-400" />
+                      <span>{selectedLeadForDetail.phone}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Associated SaaS Product Card */}
+                {associatedProd ? (
+                  <div className="p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/20 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-indigo-400" />
+                        <span className="font-bold text-white text-xs">
+                          Associated Product: {associatedProd.name}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-indigo-300 font-mono">
+                        {associatedProd.category}
+                      </span>
+                    </div>
+                    <p className="text-slate-300 text-[11px] leading-relaxed">
+                      {associatedProd.tagline || associatedProd.description}
+                    </p>
+
+                    {/* Features Badges */}
+                    {associatedProd.features && associatedProd.features.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {associatedProd.features.slice(0, 4).map((f, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2 py-0.5 rounded-md bg-indigo-900/40 text-indigo-200 text-[10px] border border-indigo-500/20"
+                          >
+                            • {f}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 text-slate-400 text-xs">
+                    Target Product: {selectedLeadForDetail.associatedProductName}
+                  </div>
+                )}
+
+                {/* Linked Historical Calls */}
+                <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-200 block uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                      <PhoneCall className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Linked Voice Calls ({linkedCalls.length})</span>
+                    </span>
+                    <button
+                      onClick={() => {
+                        const l = selectedLeadForDetail;
+                        setSelectedLeadForDetail(null);
+                        startCallWithLead(l);
+                      }}
+                      className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1"
+                    >
+                      <PhoneCall className="w-3 h-3" />
+                      <span>Dial Now</span>
+                    </button>
+                  </div>
+
+                  {linkedCalls.length === 0 ? (
+                    <div className="p-4 rounded-xl bg-slate-950/40 border border-slate-800/60 text-center text-slate-400 text-xs">
+                      No historical voice calls logged yet for this lead.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {linkedCalls.map((call) => (
+                        <div
+                          key={call.id}
+                          className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-white">{call.productName}</span>
+                              <StatusBadge status={call.status} size="sm" />
+                              {call.recordingAvailable && (
+                                <span className="text-[10px] text-emerald-400 flex items-center gap-0.5">
+                                  <Disc className="w-3 h-3" />
+                                  <span>Audio</span>
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
+                              <span>{call.date} {call.timestamp}</span>
+                              <span>•</span>
+                              <span>{formatDuration(call.durationSeconds)}</span>
+                              <span>•</span>
+                              <span>Score: {call.aiScore}%</span>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              setSelectedLeadForDetail(null);
+                              setSelectedCallId(call.id);
+                              setCurrentTab('call-history');
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-[11px] font-semibold transition-all shrink-0"
+                          >
+                            Inspect
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Linked Follow-Up Tasks */}
+                <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-200 block uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                      <ListTodo className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Associated Follow-Up Tasks ({linkedTasks.length})</span>
+                    </span>
+                    <button
+                      onClick={() => {
+                        setSelectedLeadForDetail(null);
+                        setCurrentTab('tasks');
+                      }}
+                      className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold"
+                    >
+                      View All Tasks
+                    </button>
+                  </div>
+
+                  {linkedTasks.length === 0 ? (
+                    <p className="text-slate-400 italic text-xs">No pending follow-up tasks for this prospect.</p>
+                  ) : (
+                    <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                      {linkedTasks.map((task) => (
+                        <div
+                          key={task.id}
+                          className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="space-y-0.5">
+                            <span className={`font-semibold ${task.status === 'completed' ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                              {task.title}
+                            </span>
+                            <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono">
+                              <span>Due: {new Date(task.due_date).toLocaleDateString()}</span>
+                              <span>•</span>
+                              <span>{task.assigned_to}</span>
+                            </div>
+                          </div>
+
+                          {task.status !== 'completed' ? (
+                            <button
+                              onClick={() => markTaskComplete(task.id)}
+                              className="px-2 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 text-[10px] font-semibold transition-all"
+                            >
+                              Complete
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-emerald-400 font-semibold">Done</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* SDR & Qualification Notes */}
+                <div className="p-3.5 rounded-xl bg-indigo-950/30 border border-indigo-500/20">
+                  <span className="font-semibold text-indigo-300 block uppercase tracking-wider text-[11px] mb-1">
+                    AI Qualification & SDR Notes
+                  </span>
+                  <p className="text-slate-200 leading-relaxed text-[11px]">
+                    {selectedLeadForDetail.notes || 'No qualification notes recorded yet.'}
+                  </p>
+                </div>
+
+                {/* Status Update Quick Selector */}
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1.5">
+                    Update Lead Sales Status
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {allStatuses.map((st) => (
+                      <button
+                        key={st}
+                        type="button"
+                        onClick={() => {
+                          updateLead(selectedLeadForDetail.id, { salesStatus: st });
+                          setSelectedLeadForDetail({
+                            ...selectedLeadForDetail,
+                            salesStatus: st,
+                          });
+                          showToast('Status Updated', `${selectedLeadForDetail.name} marked as ${st}.`, 'success');
+                        }}
+                        className={`p-2 rounded-xl border text-xs font-medium text-left transition-all ${
+                          selectedLeadForDetail.salesStatus === st
+                            ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-sm'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {st}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Drawer Footer */}
+              <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
+                <span className="text-xs text-slate-400 font-mono">
+                  Created: {selectedLeadForDetail.createdAt}
+                </span>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setSelectedLeadForDetail(null)}
+                    className="px-3 py-1.5 rounded-xl text-xs text-slate-300 hover:bg-slate-800"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={() => {
+                      const l = selectedLeadForDetail;
+                      setSelectedLeadForDetail(null);
+                      startCallWithLead(l);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-md shadow-indigo-600/30"
+                  >
+                    <PhoneCall className="w-3.5 h-3.5" />
+                    <span>Launch Live Voice Call</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Add / Edit Lead Modal */}
       {(isAddLeadModalOpen || editingLead) && (

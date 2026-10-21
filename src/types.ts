@@ -45,9 +45,13 @@ export interface Product {
   description: string;
   features: string[];
   pricing: ProductPricing[];
-  targetAudience: string;
+  targetAudience: string; // Ideal customer profile (ICP)
+  customerPainPoints?: string[]; // Core customer pain points
   faqs: ProductFaq[];
+  competitorDifferentiation?: string; // Differentiation vs competitors
   objectionHandling: ObjectionGuidance[];
+  demoBookingProcess?: string; // Specific demo scheduling protocol
+  purchasingInstructions?: string; // Clear purchasing/CTA instructions
   productWebsite: string;
   salesPitch: string;
   tone: 'Consultative' | 'Challenger' | 'Enthusiastic' | 'Friendly & Professional' | 'Direct & ROI-focused';
@@ -91,6 +95,34 @@ export interface TranscriptMessage {
   offsetSeconds?: number;
 }
 
+export interface EvidenceQuote {
+  quote: string;
+  category: 'requirement' | 'objection' | 'timeline' | 'interest' | 'action';
+  speaker: 'customer' | 'ai';
+}
+
+export interface PostCallStructuredAnalysis {
+  summary: string;
+  customer_business_and_use_case: string;
+  customer_requirements: string[];
+  features_discussed: string[];
+  questions_asked: string[];
+  objections: string[];
+  buying_intent: 'High' | 'Medium' | 'Low' | 'None';
+  budget_or_timeline: string;
+  promised_actions: string[];
+  sales_status: SalesStatus;
+  original_ai_status?: SalesStatus;
+  next_steps: string[];
+  follow_up_date: string | null;
+  confidence: number;
+  evidence_quotes: EvidenceQuote[];
+  is_manually_corrected?: boolean;
+  corrected_by?: string;
+  corrected_at?: string;
+  correction_notes?: string;
+}
+
 export interface CallRecord {
   id: string;
   workspace_id?: string;
@@ -106,6 +138,11 @@ export interface CallRecord {
   endTime?: string;
   durationSeconds: number;
   status: SalesStatus;
+  originalAiStatus?: SalesStatus;
+  isManuallyCorrected?: boolean;
+  correctedBy?: string;
+  correctedAt?: string;
+  correctionNotes?: string;
   callStatus?: CallStatus;
   language: string;
   recordingAvailable: boolean;
@@ -117,11 +154,40 @@ export interface CallRecord {
   aiAnalysisMetadata?: Record<string, any>;
   transcript: TranscriptMessage[];
   aiSummary: string;
-  objections: string[];
+  customerBusinessAndUseCase?: string;
   customerRequirements: string[];
+  featuresDiscussed?: string[];
+  questionsAsked?: string[];
+  objections: string[];
+  buyingIntent?: 'High' | 'Medium' | 'Low' | 'None';
+  budgetOrTimeline?: string;
+  promisedActions?: string[];
   nextSteps: string[];
+  followUpDate?: string | null;
+  evidenceQuotes?: EvidenceQuote[];
+  structuredAnalysis?: PostCallStructuredAnalysis;
   consentStatus?: boolean;
   consentTimestamp?: string;
+  consentText?: string;
+  summaryStatus?: 'Completed' | 'Processing' | 'Failed';
+}
+
+export interface FollowUpTask {
+  id: string;
+  workspace_id?: string;
+  call_session_id?: string;
+  lead_id?: string;
+  customerName?: string;
+  customerEmail?: string;
+  productName?: string;
+  title: string;
+  description: string;
+  due_date: string; // ISO date string
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  assigned_to: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface AgentSettings {
@@ -132,7 +198,11 @@ export interface AgentSettings {
   voiceGender: 'female' | 'male' | 'neutral';
   personality: string;
   salesApproach: 'Consultative' | 'Solution Selling' | 'Spin Selling' | 'Value-Based' | 'Challenger';
+  salesTone: 'Consultative' | 'Challenger' | 'Enthusiastic' | 'Friendly & Professional' | 'Direct & ROI-focused';
   openingGreeting: string;
+  qualificationQuestions: string[];
+  productSpecificInstructions: string;
+  closingBehavior: string;
   supportedLanguages: string[];
   conversationRules: string[];
   followUpBehavior: string;
@@ -145,7 +215,7 @@ export interface AgentSettings {
 
 export interface IntegrationConfig {
   name: string;
-  provider: 'ElevenLabs' | 'OpenAI Realtime' | 'Deepgram' | 'Twilio Telephony' | 'HubSpot CRM' | 'Salesforce';
+  provider: 'ElevenLabs' | 'Ollama Cloud' | 'Deepgram' | 'Twilio Telephony' | 'HubSpot CRM' | 'Salesforce';
   category: 'Voice Engine' | 'LLM Reasoning' | 'Speech-to-Text' | 'Telephony' | 'CRM';
   status: 'Connected' | 'Not Configured' | 'Action Required';
   keyMasked?: string;

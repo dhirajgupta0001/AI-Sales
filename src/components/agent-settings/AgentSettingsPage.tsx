@@ -26,8 +26,15 @@ export const AgentSettingsPage: React.FC = () => {
   const { agentSettings, updateAgentSettings, setCurrentTab } = useApp();
   const { showToast } = useToast();
 
-  const [formData, setFormData] = useState({ ...agentSettings });
+  const [formData, setFormData] = useState({
+    ...agentSettings,
+    salesTone: agentSettings.salesTone || 'Consultative',
+    qualificationQuestions: agentSettings.qualificationQuestions || [],
+    productSpecificInstructions: agentSettings.productSpecificInstructions || '',
+    closingBehavior: agentSettings.closingBehavior || '',
+  });
   const [newRuleText, setNewRuleText] = useState('');
+  const [newQuestionText, setNewQuestionText] = useState('');
   const [isPlayingGreeting, setIsPlayingGreeting] = useState(false);
   const [testedGreetingLang, setTestedGreetingLang] = useState('English');
 
@@ -35,7 +42,7 @@ export const AgentSettingsPage: React.FC = () => {
     { id: 'v1', name: 'ElevenLabs Nova (Natural Expressive)', gender: 'female', accents: 'US & Global English' },
     { id: 'v2', name: 'ElevenLabs Aditi (Multilingual Hinglish & Indic)', gender: 'female', accents: 'Hindi, English, Telugu' },
     { id: 'v3', name: 'ElevenLabs Marcus (Consultative Enterprise)', gender: 'male', accents: 'US Corporate' },
-    { id: 'v4', name: 'OpenAI Realtime Alloy (Versatile)', gender: 'neutral', accents: 'Global Neutral' },
+    { id: 'v4', name: 'Browser Web Speech Native (English / Hindi / Telugu)', gender: 'neutral', accents: 'OS Native Voices' },
     { id: 'v5', name: 'Deepgram Aura Asteria (Sub-200ms Low Latency)', gender: 'female', accents: 'Conversational' }
   ];
 
@@ -71,6 +78,23 @@ export const AgentSettingsPage: React.FC = () => {
     setFormData({
       ...formData,
       conversationRules: formData.conversationRules.filter((_, i) => i !== index)
+    });
+  };
+
+  const handleAddQuestion = () => {
+    if (!newQuestionText.trim()) return;
+    setFormData({
+      ...formData,
+      qualificationQuestions: [...formData.qualificationQuestions, newQuestionText.trim()]
+    });
+    setNewQuestionText('');
+    showToast('Qualification Question Added', 'Agent will discover this criteria in sequence.', 'info');
+  };
+
+  const handleRemoveQuestion = (index: number) => {
+    setFormData({
+      ...formData,
+      qualificationQuestions: formData.qualificationQuestions.filter((_, i) => i !== index)
     });
   };
 
@@ -210,6 +234,38 @@ export const AgentSettingsPage: React.FC = () => {
                           {appr.desc}
                         </p>
                       </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Conversational Sales Tone */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Conversational Sales Tone
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {[
+                    'Consultative',
+                    'Challenger',
+                    'Enthusiastic',
+                    'Friendly & Professional',
+                    'Direct & ROI-focused',
+                  ].map((toneOption) => {
+                    const isSelected = formData.salesTone === toneOption;
+                    return (
+                      <button
+                        key={toneOption}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, salesTone: toneOption as any })}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all text-left ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30'
+                            : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-600'
+                        }`}
+                      >
+                        {toneOption}
+                      </button>
                     );
                   })}
                 </div>
@@ -489,12 +545,70 @@ export const AgentSettingsPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Follow-up Behavior & Demo Booking Instructions */}
+            {/* Qualification Questions Framework */}
+            <div className="rounded-2xl bg-[#0B132B]/90 backdrop-blur-md border border-slate-800 p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <HelpCircle className="w-4 h-4 text-indigo-400" />
+                  <h3 className="font-bold text-white text-base">Discovery & Qualification Questions</h3>
+                </div>
+                <span className="text-xs text-slate-400 font-mono">
+                  {formData.qualificationQuestions.length} Questions
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                The agent asks these qualification questions <strong className="text-slate-200">one at a time</strong> during the discovery phase to uncover acute bottlenecks before positioning product benefits.
+              </p>
+
+              {/* Add question input */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newQuestionText}
+                  onChange={(e) => setNewQuestionText(e.target.value)}
+                  placeholder="e.g. What is your current team size and outbound volume?..."
+                  className="flex-1 px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddQuestion}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shrink-0"
+                >
+                  Add Question
+                </button>
+              </div>
+
+              {/* Questions list */}
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {formData.qualificationQuestions.map((q, idx) => (
+                  <div
+                    key={idx}
+                    className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800 text-xs flex items-start justify-between gap-2 text-slate-200 group"
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="font-mono text-indigo-400 text-[10px] mt-0.5 font-bold">
+                        Q{idx + 1}
+                      </span>
+                      <p className="leading-relaxed">{q}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveQuestion(idx)}
+                      className="p-1 rounded text-slate-400 hover:text-rose-400 opacity-60 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Follow-up Behavior, Product Instructions & Closing Behavior */}
             <div className="rounded-2xl bg-[#0B132B]/90 backdrop-blur-md border border-slate-800 p-6 shadow-xl space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                 <div className="flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-cyan-400" />
-                  <h3 className="font-bold text-white text-base">Demo Booking & Follow-Up</h3>
+                  <h3 className="font-bold text-white text-base">Closing Behavior & Guardrails</h3>
                 </div>
               </div>
 
@@ -508,6 +622,36 @@ export const AgentSettingsPage: React.FC = () => {
                   onChange={(e) =>
                     setFormData({ ...formData, demoBookingInstructions: e.target.value })
                   }
+                  className="w-full px-3.5 py-2 text-xs bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 leading-relaxed font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Product-Specific Instructions & Boundary Safeguards
+                </label>
+                <textarea
+                  rows={2}
+                  value={formData.productSpecificInstructions}
+                  onChange={(e) =>
+                    setFormData({ ...formData, productSpecificInstructions: e.target.value })
+                  }
+                  placeholder="Rules for addressing unannounced features, technical limits, or security claims..."
+                  className="w-full px-3.5 py-2 text-xs bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 leading-relaxed font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Closing Behavior & Immediate Opt-Out Compliance
+                </label>
+                <textarea
+                  rows={2}
+                  value={formData.closingBehavior}
+                  onChange={(e) =>
+                    setFormData({ ...formData, closingBehavior: e.target.value })
+                  }
+                  placeholder="How the agent concludes the conversation and respects customer requests to end outreach..."
                   className="w-full px-3.5 py-2 text-xs bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 leading-relaxed font-mono"
                 />
               </div>

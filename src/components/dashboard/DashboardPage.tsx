@@ -21,55 +21,147 @@ import {
   Play,
   Volume2,
   X,
-  FileText
+  FileText,
+  ListTodo,
+  AlertTriangle,
+  Check
 } from 'lucide-react';
 import {
-  DASHBOARD_METRICS,
   CONVERSION_TREND_DATA,
-  SALES_STATUS_DISTRIBUTION,
   RECENT_ACTIVITY_FEED,
 } from '../../data/mockData';
-import { CallRecord } from '../../types';
+import { CallRecord, SalesStatus } from '../../types';
 
 export const DashboardPage: React.FC = () => {
-  const { calls, products, setCurrentTab, setSelectedCallId, startCallWithLead, leads } = useApp();
+  const { calls, products, setCurrentTab, setSelectedCallId, startCallWithLead, leads, followUpTasks, markTaskComplete } = useApp();
   const { showToast } = useToast();
   const [trendRange, setTrendRange] = useState<'7d' | '30d' | '90d'>('7d');
   const [selectedCallForModal, setSelectedCallForModal] = useState<CallRecord | null>(null);
+
+  // 1. Avoid counting duplicate call sessions by tracking unique IDs
+  const uniqueCallIds = new Set<string>();
+  const uniqueCalls: CallRecord[] = [];
+  for (const c of calls) {
+    if (!uniqueCallIds.has(c.id)) {
+      uniqueCallIds.add(c.id);
+      uniqueCalls.push(c);
+    }
+  }
+
+  // 2. Real Database Counts
+  const totalCallsCount = uniqueCalls.length;
+  const completedCallsCount = uniqueCalls.filter(
+    (c) => c.callStatus === 'Completed' || c.durationSeconds > 0
+  ).length;
+
+  const interestedLeadsCount = leads.filter(
+    (l) => l.salesStatus === 'Interested' || l.salesStatus === 'Demo Requested'
+  ).length;
+
+  const convertedCallsCount = uniqueCalls.filter((c) => c.status === 'Converted').length;
+
+  // 3. Clear Conversion-Rate Denominator Definition:
+  // Denominator = Unique completed calls with verified customer engagement (duration > 15s or valid turns),
+  // strictly excluding "No Response" calls where prospect disconnected immediately without engagement.
+  const engagedCallsCount = uniqueCalls.filter(
+    (c) => c.status !== 'No Response' && (c.durationSeconds >= 15 || c.callStatus === 'Completed')
+  ).length;
+
+  const conversionRate =
+    engagedCallsCount > 0 ? ((convertedCallsCount / engagedCallsCount) * 100).toFixed(1) : '0.0';
+
+  const totalDurationSec = uniqueCalls.reduce((acc, c) => acc + (c.durationSeconds || 0), 0);
+  const averageCallDurationSec =
+    completedCallsCount > 0 ? Math.round(totalDurationSec / completedCallsCount) : 0;
+
+  // 4. Real Status Distribution calculated dynamically from database records
+  const statusCounts: Record<SalesStatus, number> = {
+    'Converted': 0,
+    'Interested': 0,
+    'Follow-up Required': 0,
+    'Not Interested': 0,
+    'Demo Requested': 0,
+    'No Response': 0,
+  };
+
+  for (const c of uniqueCalls) {
+    if (statusCounts[c.status] !== undefined) {
+      statusCounts[c.status]++;
+    }
+  }
+
+  const realStatusDistribution = [
+    {
+      status: 'Converted' as SalesStatus,
+      count: statusCounts['Converted'],
+      percentage: totalCallsCount > 0 ? Math.round((statusCounts['Converted'] / totalCallsCount) * 100) : 0,
+      color: '#10B981',
+    },
+    {
+      status: 'Interested' as SalesStatus,
+      count: statusCounts['Interested'],
+      percentage: totalCallsCount > 0 ? Math.round((statusCounts['Interested'] / totalCallsCount) * 100) : 0,
+      color: '#6366F1',
+    },
+    {
+      status: 'Demo Requested' as SalesStatus,
+      count: statusCounts['Demo Requested'],
+      percentage: totalCallsCount > 0 ? Math.round((statusCounts['Demo Requested'] / totalCallsCount) * 100) : 0,
+      color: '#8B5CF6',
+    },
+    {
+      status: 'Follow-up Required' as SalesStatus,
+      count: statusCounts['Follow-up Required'],
+      percentage: totalCallsCount > 0 ? Math.round((statusCounts['Follow-up Required'] / totalCallsCount) * 100) : 0,
+      color: '#F59E0B',
+    },
+    {
+      status: 'Not Interested' as SalesStatus,
+      count: statusCounts['Not Interested'],
+      percentage: totalCallsCount > 0 ? Math.round((statusCounts['Not Interested'] / totalCallsCount) * 100) : 0,
+      color: '#EF4444',
+    },
+    {
+      status: 'No Response' as SalesStatus,
+      count: statusCounts['No Response'],
+      percentage: totalCallsCount > 0 ? Math.round((statusCounts['No Response'] / totalCallsCount) * 100) : 0,
+      color: '#64748B',
+    },
+  ];
 
   // Top metric cards
   const stats = [
     {
       label: 'Total Calls',
-      value: DASHBOARD_METRICS.totalCalls.toLocaleString(),
-      subtext: '+18.4% vs last month',
+      value: totalCallsCount.toLocaleString(),
+      subtext: 'Unique session IDs logged',
       icon: PhoneCall,
       color: 'indigo',
       glow: 'shadow-indigo-500/10 border-indigo-500/20',
-      badge: 'All Engines',
+      badge: 'Database Verified',
     },
     {
       label: 'Completed Calls',
-      value: DASHBOARD_METRICS.completedCalls.toLocaleString(),
-      subtext: '89.6% completion rate',
+      value: completedCallsCount.toLocaleString(),
+      subtext: `${totalCallsCount > 0 ? Math.round((completedCallsCount / totalCallsCount) * 100) : 100}% completion rate`,
       icon: CheckCircle2,
       color: 'emerald',
       glow: 'shadow-emerald-500/10 border-emerald-500/20',
-      badge: '98% Voice Quality',
+      badge: 'Audited Audio',
     },
     {
       label: 'Interested Leads',
-      value: DASHBOARD_METRICS.interestedLeads.toLocaleString(),
-      subtext: 'High purchase intent',
+      value: interestedLeadsCount.toLocaleString(),
+      subtext: 'Demo / Interested pipeline',
       icon: Users,
       color: 'violet',
       glow: 'shadow-violet-500/10 border-violet-500/20',
-      badge: 'Ready to Close',
+      badge: 'Active Pipeline',
     },
     {
       label: 'Conversions',
-      value: DASHBOARD_METRICS.conversions.toLocaleString(),
-      subtext: '$894k pipeline influenced',
+      value: convertedCallsCount.toLocaleString(),
+      subtext: 'Confirmed SaaS subscriptions',
       icon: TrendingUp,
       color: 'cyan',
       glow: 'shadow-cyan-500/10 border-cyan-500/20',
@@ -77,17 +169,17 @@ export const DashboardPage: React.FC = () => {
     },
     {
       label: 'Conversion Rate',
-      value: `${DASHBOARD_METRICS.conversionRate}%`,
-      subtext: '+4.2% higher than human SDRs',
+      value: `${conversionRate}%`,
+      subtext: `Denominator: ${engagedCallsCount} engaged calls (excl. No Response)`,
       icon: Sparkles,
       color: 'amber',
       glow: 'shadow-amber-500/10 border-amber-500/20',
-      badge: 'Top Decile',
+      badge: 'Qualified Metric',
     },
     {
       label: 'Avg Call Duration',
-      value: formatDuration(DASHBOARD_METRICS.averageCallDurationSec),
-      subtext: 'Natural pacing & rapport',
+      value: formatDuration(averageCallDurationSec),
+      subtext: 'Natural pacing & qualification',
       icon: Clock,
       color: 'rose',
       glow: 'shadow-rose-500/10 border-rose-500/20',
@@ -95,7 +187,7 @@ export const DashboardPage: React.FC = () => {
     },
   ];
 
-  const recentCalls = calls.slice(0, 5);
+  const recentCalls = uniqueCalls.slice(0, 5);
 
   const handleInspectCall = (call: CallRecord) => {
     setSelectedCallId(call.id);
@@ -286,22 +378,22 @@ export const DashboardPage: React.FC = () => {
                   Sales Status Breakdown
                 </h3>
               </div>
-              <span className="text-[11px] text-slate-400 font-mono">1,482 Total</span>
+              <span className="text-[11px] text-slate-400 font-mono">{totalCallsCount} Real Calls</span>
             </div>
             <p className="text-xs text-slate-400 mt-2">
-              Proportional distribution across all standardized qualification stages.
+              Proportional distribution calculated directly from authenticated database sessions.
             </p>
 
             {/* Visual stacked percentage bar */}
             <div className="w-full h-4 rounded-full overflow-hidden flex my-4 bg-slate-800 border border-slate-700/50">
-              {SALES_STATUS_DISTRIBUTION.map((item, idx) => (
+              {realStatusDistribution.map((item, idx) => (
                 <div
                   key={idx}
                   style={{
-                    width: `${item.percentage}%`,
+                    width: `${Math.max(item.percentage, item.count > 0 ? 5 : 0)}%`,
                     backgroundColor: item.color,
                   }}
-                  title={`${item.status}: ${item.percentage}%`}
+                  title={`${item.status}: ${item.count} calls (${item.percentage}%)`}
                   className="h-full transition-all hover:opacity-85"
                 />
               ))}
@@ -309,7 +401,7 @@ export const DashboardPage: React.FC = () => {
 
             {/* List breakdown */}
             <div className="space-y-2.5 mt-4">
-              {SALES_STATUS_DISTRIBUTION.map((item, idx) => (
+              {realStatusDistribution.map((item, idx) => (
                 <div
                   key={idx}
                   className="flex items-center justify-between p-2 rounded-xl bg-slate-900/60 hover:bg-slate-800/60 transition-colors border border-slate-800/50 text-xs"
@@ -322,7 +414,7 @@ export const DashboardPage: React.FC = () => {
                     <span className="font-medium text-slate-200">{item.status}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="font-mono text-slate-400">{item.count} calls</span>
+                    <span className="font-mono text-slate-400">{item.count} {item.count === 1 ? 'call' : 'calls'}</span>
                     <span className="font-semibold text-slate-200 w-12 text-right">
                       {item.percentage}%
                     </span>
@@ -333,11 +425,73 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-            <span>Model: GPT-4o + ElevenLabs</span>
-            <span className="text-emerald-400 font-medium">99.4% Disposition Accuracy</span>
+            <span>Engine: Ollama Cloud + Web Speech</span>
+            <span className="text-emerald-400 font-medium">Deterministic Precedence Engine</span>
           </div>
         </div>
       </div>
+
+      {/* Priority Follow-Up Tasks Pipeline Banner */}
+      {followUpTasks && followUpTasks.length > 0 && (
+        <div className="rounded-2xl bg-gradient-to-r from-[#0E1635] via-[#0B132B] to-[#12163E] border border-indigo-500/20 p-5 shadow-xl space-y-3">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+              <ListTodo className="w-4 h-4 text-amber-400" />
+              <h3 className="font-bold text-white text-sm">
+                Priority Post-Call Follow-Up Pipeline ({followUpTasks.filter((t) => t.status !== 'completed').length} Pending)
+              </h3>
+            </div>
+            <button
+              onClick={() => setCurrentTab('tasks')}
+              className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+            >
+              <span>Manage All Tasks</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            {followUpTasks
+              .filter((t) => t.status !== 'completed')
+              .slice(0, 3)
+              .map((task) => {
+                const isOverdue = new Date(task.due_date) < new Date();
+                return (
+                  <div
+                    key={task.id}
+                    className={`p-3.5 rounded-xl border flex flex-col justify-between space-y-2 ${
+                      isOverdue
+                        ? 'bg-rose-950/20 border-rose-500/30'
+                        : 'bg-slate-900/60 border-slate-800'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <span className="font-semibold text-white truncate max-w-[170px]">{task.customerName || 'Prospect'}</span>
+                        {isOverdue ? (
+                          <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[10px] font-bold">OVERDUE</span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-semibold capitalize">{task.priority}</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-300 line-clamp-2">{task.title}</p>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800/80 text-[10px] text-slate-400">
+                      <span>Due: {new Date(task.due_date).toLocaleDateString()}</span>
+                      <button
+                        onClick={() => markTaskComplete(task.id)}
+                        className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium"
+                      >
+                        Complete
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
 
       {/* Lower Row: Recent Calls Table & Recent Activity Feed */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -1,4 +1,4 @@
-import { Product, Lead, CallRecord, AgentSettings, AppSettings, Language } from '../types';
+import { Product, Lead, CallRecord, AgentSettings, AppSettings, Language, FollowUpTask } from '../types';
 
 export const SUPPORTED_LANGUAGES: Language[] = [
   { code: 'en', name: 'English', nativeName: 'English (US & Global)', flag: '🇺🇸' },
@@ -31,11 +31,18 @@ export const INITIAL_PRODUCTS: Product[] = [
       { tier: 'Enterprise Scale', price: '$249', period: '/user/mo', billing: 'Custom SLA & Dedicated Voice Cluster' }
     ],
     targetAudience: 'B2B SaaS companies, mid-market sales organizations, agency owners, and revenue leaders managing 10+ SDRs and AEs.',
+    customerPainPoints: [
+      'Sales reps spending 65% of their working hours manually updating CRM notes instead of selling',
+      'Inbound leads going cold due to slow 4+ hour follow-up latency',
+      'Inaccurate pipeline forecasts causing missed quarterly revenue targets',
+      'High SDR turnover and costly 3-month onboarding ramps'
+    ],
     faqs: [
       { q: 'How long does implementation take?', a: 'Standard onboarding takes under 35 minutes with our native OAuth integrations for Google Workspace and Microsoft 365.' },
       { q: 'Can OmniFlow replace our existing CRM?', a: 'OmniFlow can run as a complete standalone CRM or sit as an intelligence acceleration layer on top of Salesforce or HubSpot.' },
       { q: 'Is our customer voice and pipeline data secure?', a: 'Yes, SOC-2 Type II certified, GDPR compliant, with zero training on your enterprise proprietary customer data.' }
     ],
+    competitorDifferentiation: 'Unlike Salesforce and HubSpot that require manual data entry, OmniFlow autonomously executes voice follow-ups, captures conversation notes with 99.2% accuracy, and updates deal stages in real time without human intervention.',
     objectionHandling: [
       {
         objection: 'We already use HubSpot / Salesforce and our reps hate switching tools.',
@@ -50,6 +57,8 @@ export const INITIAL_PRODUCTS: Product[] = [
         counter: 'VoiceSell AI uses ultra-low latency conversational speech with natural breathing, pauses, and context comprehension that 94% of prospects perceive as human SDRs.'
       }
     ],
+    demoBookingProcess: 'Offer two specific times (Tomorrow afternoon or Thursday morning) to walk through a live pipeline benchmark. Upon verbal consent, confirm attendee email and send calendar invite.',
+    purchasingInstructions: 'Direct customer to https://omniflowcrm.io/pricing or offer an annual enterprise agreement with customized payment terms.',
     productWebsite: 'https://omniflowcrm.io',
     salesPitch: 'OmniFlow CRM helps revenue teams recover 12+ lost selling hours every week by putting lead follow-up, voice outreach, and pipeline hygiene on autonomous autopilot.',
     tone: 'Consultative',
@@ -79,16 +88,25 @@ export const INITIAL_PRODUCTS: Product[] = [
       { tier: 'Mission Critical', price: 'Custom', period: '/cluster', billing: 'Custom SLA & On-prem VPC' }
     ],
     targetAudience: 'CTOs, VP of Engineering, SRE leads, and Platform Engineers maintaining distributed Kubernetes clusters.',
+    customerPainPoints: [
+      'Runaway Datadog and Dynatrace observability bills inflating 40% year over year',
+      'Pager alert fatigue with dozens of noisy, un-correlated Slack notifications',
+      'Lengthy 2-hour Mean Time to Resolution (MTTR) during critical production outages',
+      'High CPU agent overhead degrading production microservice throughput'
+    ],
     faqs: [
       { q: 'Does eBPF instrumentation impact CPU overhead?', a: 'No, kernel-level eBPF operates with less than 0.8% CPU overhead, making it drastically lighter than traditional bytecode agents.' },
       { q: 'Is OpenTelemetry supported natively?', a: 'Yes, 100% compliant with standard OTel collectors and traces.' }
     ],
+    competitorDifferentiation: 'Unlike Datadog which charges exorbitant custom metric surcharges, CloudPulse leverages non-invasive eBPF in the Linux kernel with predictable flat-rate host pricing and zero telemetry tax.',
     objectionHandling: [
       {
         objection: 'We are already locked into Datadog.',
         counter: 'CloudPulse provides transparent dual-shipping for 30 days. Customers typically reduce their observability bill by 42% while gaining sub-second root-cause AI diagnosis.'
       }
     ],
+    demoBookingProcess: 'Propose a 20-minute sandbox demonstration with the prospect\'s lead platform engineer. Offer to inspect one non-production staging cluster.',
+    purchasingInstructions: 'Sign up immediately at https://cloudpulse-apm.tech/start or invite procurement to negotiate an annual cluster license.',
     productWebsite: 'https://cloudpulse-apm.tech',
     salesPitch: 'CloudPulse slashes MTTR by 78% and halves runaway observability bills with zero-overhead eBPF tracing.',
     tone: 'Direct & ROI-focused',
@@ -118,15 +136,24 @@ export const INITIAL_PRODUCTS: Product[] = [
       { tier: 'GovCloud & Defense', price: '$35', period: '/user/mo', billing: 'Air-gapped deployment' }
     ],
     targetAudience: 'CISOs, InfoSec Directors, Compliance Officers, and IT Security managers.',
+    customerPainPoints: [
+      'Compromised employee credentials causing unauthorized lateral movement in cloud infrastructure',
+      'Manual, stressful SOC-2 and ISO compliance audit preparation taking months of engineering effort',
+      'Standing admin privileges left open indefinitely on AWS/GCP accounts',
+      'Employee resistance to cumbersome login authenticators'
+    ],
     faqs: [
       { q: 'Does it support hybrid Active Directory?', a: 'Yes, full bi-directional sync with Azure AD / Entra ID, Okta, and on-premises LDAP.' }
     ],
+    competitorDifferentiation: 'Unlike legacy perimeter VPNs or rigid Okta setups, Securify calculates continuous per-request risk scores and grants ephemeral access that evaporates automatically when tasks end.',
     objectionHandling: [
       {
         objection: 'Users will complain about friction when logging in.',
         counter: 'Securify uses risk-based continuous scoring — 92% of everyday sessions experience zero prompts unless an anomaly or untrusted network is detected.'
       }
     ],
+    demoBookingProcess: 'Offer a complimentary 30-minute Attack Surface and Credential Exposure audit conducted with their Chief Information Security Officer or IT director.',
+    purchasingInstructions: 'Order online at https://securify.cloud/enterprise or request an invoice for custom user tiers.',
     productWebsite: 'https://securify.cloud',
     salesPitch: 'Protect every endpoint and automate your next security audit with zero user friction.',
     tone: 'Friendly & Professional',
@@ -156,15 +183,24 @@ export const INITIAL_PRODUCTS: Product[] = [
       { tier: 'Enterprise Dedicated', price: '$120', period: '/dev/mo', billing: 'Self-hosted LLM' }
     ],
     targetAudience: 'Engineering managers, lead developers, and VP of Software Engineering.',
+    customerPainPoints: [
+      'Pull requests sitting unreviewed for 3+ days, stalling sprint velocity',
+      'Hidden memory leaks and concurrency race conditions escaping to production',
+      'Developers wasting 25% of sprint cycles writing boilerplate regression tests',
+      'Junior engineers lacking senior architectural mentoring during code reviews'
+    ],
     faqs: [
       { q: 'Does DevSprint send code to public model providers?', a: 'No, private tenant enterprise VPC isolation with guaranteed zero data retention.' }
     ],
+    competitorDifferentiation: 'Unlike GitHub Copilot which functions as an in-editor autocomplete, DevSprint reviews complete pull requests, identifies cross-service dependency breaks, and generates unit test coverage automatically.',
     objectionHandling: [
       {
         objection: 'We already use GitHub Copilot.',
         counter: 'Copilot is an autocomplete tool while you type; DevSprint operates autonomously on your GitHub PRs, writing comprehensive regression test suites and flagging race conditions before human review.'
       }
     ],
+    demoBookingProcess: 'Coordinate a 15-minute live review demo on a sample repository with the VP of Engineering or Tech Lead.',
+    purchasingInstructions: 'Connect your GitHub/GitLab organization at https://devsprint.dev/signup to start the 14-day team trial.',
     productWebsite: 'https://devsprint.dev',
     salesPitch: 'Cut PR review cycles from 3 days to 45 minutes while achieving 85%+ branch test coverage.',
     tone: 'Challenger',
@@ -528,15 +564,26 @@ export const INITIAL_AGENT_SETTINGS: AgentSettings = {
   voiceGender: 'female',
   personality: 'Empathetic, razor-sharp enterprise consultant who actively listens, identifies acute business bottlenecks, and gently steers toward scheduling high-value demos.',
   salesApproach: 'Consultative',
+  salesTone: 'Consultative',
   openingGreeting: 'Hello [Customer Name]! This is Aria with [Product Name]. I noticed your team has been scaling operations recently — do you have two minutes to discuss accelerating your pipeline?',
+  qualificationQuestions: [
+    'Could you briefly describe your current team structure and active workflow bottlenecks?',
+    'What tools or systems are you currently using for this process, and where do they fall short?',
+    'What is your target timeline for evaluating and putting an automated solution in place?'
+  ],
+  productSpecificInstructions: 'Always ground product capability answers strictly in the selected product\'s verified feature list and documented FAQs. If the customer asks about unsupported features or unannounced roadmaps, acknowledge transparently that engineering evaluates custom requests.',
+  closingBehavior: 'Propose two concrete times for a 15-minute live architecture demo with an enterprise specialist. If the customer requests to end the call or stop outreach, immediately acknowledge politely, confirm no further contact, and conclude with warm professional courtesy.',
   supportedLanguages: ['English', 'Hindi', 'Telugu', 'Spanish', 'Tamil', 'German', 'French', 'Kannada'],
   conversationRules: [
+    'Always introduce yourself transparently as an AI sales assistant right at the start.',
+    'Ask permission to continue the conversation before launching into discovery.',
+    'Ask qualification questions one at a time to keep the dialogue natural.',
+    'Explain the product using benefits directly relevant to the customer\'s expressed pain points.',
+    'Never invent features, discounts, SLAs, guarantees, testimonials, or pricing not explicitly authorized.',
     'Always address the prospect by their respectful first name or localized title (e.g., "ji" in Hindi, "Garu" in Telugu).',
-    'Never interrupt while the customer is actively vocalizing; allow a 400ms buffer before responding.',
-    'If the prospect expresses hesitation around price, immediately pivot to ROI and deferred trial options.',
-    'Ask clarifying discovery questions before offering a product feature pitch.',
-    'Ensure explicit verbal agreement before sending calendar invites or locking demo times.',
-    'Maintain a calm, warm, and highly professional conversational pace.'
+    'Keep responses natural and concise for spoken voice audio (1 to 2 sentences per turn).',
+    'Do not claim that a purchase, subscription, or demo booking succeeded unless backend confirmation is provided.',
+    'Immediately honor requests to end the call or stop sales outreach without being pushy.'
   ],
   followUpBehavior: 'Automatically synthesize call transcripts into CRM tasks, send personalized calendar invitations within 60 seconds, and enqueue WhatsApp/SMS recaps if requested.',
   demoBookingInstructions: 'Offer two specific time slots (e.g., "Tomorrow at 3 PM or Thursday at 11 AM"). Check company calendar availability in real time and immediately confirm email address spelling.',
@@ -575,13 +622,13 @@ export const INITIAL_APP_SETTINGS: AppSettings = {
       docsUrl: 'https://elevenlabs.io/docs/conversational-ai'
     },
     {
-      name: 'OpenAI Realtime WebSocket API (GPT-4o Voice)',
-      provider: 'OpenAI Realtime',
+      name: 'Ollama Cloud LLM API (llama3.3 / mistral / deepseek)',
+      provider: 'Ollama Cloud',
       category: 'LLM Reasoning',
       status: 'Not Configured',
-      keyMasked: 'sk-proj-••••••••••••••4k19',
-      lastTested: 'Awaiting WebSocket endpoint configuration',
-      docsUrl: 'https://platform.openai.com/docs/guides/realtime'
+      keyMasked: 'ollama_••••••••••••••••9a1f',
+      lastTested: 'Awaiting Ollama Cloud API Key & Model Configuration',
+      docsUrl: 'https://ollama.com'
     },
     {
       name: 'Deepgram Nova-2 Multilingual ASR',
@@ -658,6 +705,69 @@ export const SALES_STATUS_DISTRIBUTION = [
   { status: 'Follow-up Required', count: 242, percentage: 16.3, color: '#F59E0B', bg: 'bg-amber-500' },
   { status: 'Not Interested', count: 186, percentage: 12.6, color: '#EF4444', bg: 'bg-rose-500' },
   { status: 'No Response', count: 127, percentage: 8.5, color: '#64748B', bg: 'bg-slate-500' }
+];
+
+export const INITIAL_FOLLOW_UP_TASKS: FollowUpTask[] = [
+  {
+    id: 'task-1',
+    call_session_id: 'call-102',
+    lead_id: 'lead-2',
+    customerName: 'Kavya Sree Reddy',
+    customerEmail: 'kavya.reddy@cyientrix.io',
+    productName: 'CloudPulse APM',
+    title: 'Conduct eBPF Technical Sandbox Demo with DevOps Leads',
+    description: 'Walk through staging cluster installation and compare live overhead vs Datadog on 80 Kubernetes nodes.',
+    due_date: new Date(Date.now() + 86400000 * 2).toISOString(),
+    status: 'pending',
+    priority: 'high',
+    assigned_to: 'Enterprise Solutions Architect',
+    created_at: '2026-10-20T10:45:00Z',
+  },
+  {
+    id: 'task-2',
+    call_session_id: 'call-104',
+    lead_id: 'lead-4',
+    customerName: 'Dr. Ananya Rao',
+    customerEmail: 'ananya.rao@zenithhealth.org',
+    productName: 'Zenith HealthCloud',
+    title: 'Send BAA & SOC-2 Type II Healthcare Compliance Dossier',
+    description: 'Prospect requires legal verification of HIPAA data residency prior to procurement review.',
+    due_date: new Date(Date.now() - 86400000).toISOString(), // Overdue
+    status: 'pending',
+    priority: 'urgent',
+    assigned_to: 'Compliance & Legal AE',
+    created_at: '2026-10-18T14:30:00Z',
+  },
+  {
+    id: 'task-3',
+    call_session_id: 'call-101',
+    lead_id: 'lead-1',
+    customerName: 'Vikramaditya Sharma',
+    customerEmail: 'vikram@finapex.co',
+    productName: 'OmniFlow CRM',
+    title: 'Send Executed Order Form & SSO Setup Guide',
+    description: 'Confirmed 25 SDR seats. Dispatch onboarding portal link and verify Salesforce API integration credentials.',
+    due_date: new Date(Date.now() + 86400000).toISOString(),
+    status: 'in_progress',
+    priority: 'high',
+    assigned_to: 'Customer Success Manager',
+    created_at: '2026-10-20T11:20:00Z',
+  },
+  {
+    id: 'task-4',
+    call_session_id: 'call-103',
+    lead_id: 'lead-3',
+    customerName: 'Marcus Vance',
+    customerEmail: 'marcus@apexlogistics.ca',
+    productName: 'OmniFlow CRM',
+    title: 'Share ROI Benchmark Study vs Legacy CRM',
+    description: 'Prospect requested 3 customer references in North American 3PL logistics.',
+    due_date: new Date(Date.now() - 86400000 * 3).toISOString(),
+    status: 'completed',
+    priority: 'medium',
+    assigned_to: 'Mid-Market AE Team',
+    created_at: '2026-10-17T09:15:00Z',
+  },
 ];
 
 export const RECENT_ACTIVITY_FEED = [

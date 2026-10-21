@@ -14,7 +14,8 @@ import {
   ShieldCheck,
   Zap,
   Building,
-  LogOut
+  LogOut,
+  ListTodo
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -23,8 +24,10 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
-  const { currentTab, setCurrentTab, appSettings } = useApp();
+  const { currentTab, setCurrentTab, appSettings, followUpTasks } = useApp();
   const { user, activeWorkspace, memberRole, signOut } = useAuth();
+
+  const pendingTasksCount = followUpTasks ? followUpTasks.filter((t) => t.status === 'pending').length : 0;
 
   const navItems: {
     id: NavigationTab;
@@ -59,6 +62,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
       id: 'call-history',
       label: 'Call History',
       icon: PhoneCall,
+    },
+    {
+      id: 'tasks',
+      label: 'Follow-Up Tasks',
+      icon: ListTodo,
+      badge: pendingTasksCount > 0 ? `${pendingTasksCount} pending` : undefined,
+      badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
     },
     {
       id: 'agent-settings',

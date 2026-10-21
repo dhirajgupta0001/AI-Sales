@@ -50,8 +50,12 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ onOpenMobileMenu }) => {
         return { title: 'Call History & Recordings', subtitle: 'Inspect transcripts, audio recordings, and AI-scored summaries' };
       case 'agent-settings':
         return { title: 'AI Sales Agent Personality', subtitle: 'Tune conversation rules, voice cadence, objection logic, and booking' };
+      case 'tasks':
+        return { title: 'Follow-Up Tasks & Pipeline', subtitle: 'Manage post-call action items, team assignments, and due dates' };
       case 'settings':
         return { title: 'Platform & API Settings', subtitle: 'Manage workspaces, telephony endpoints, LLM engines, and privacy' };
+      default:
+        return { title: 'VoiceSell AI', subtitle: 'AI-powered multilingual voice sales agent platform' };
     }
   };
 

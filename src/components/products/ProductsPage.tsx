@@ -46,6 +46,10 @@ export const ProductsPage: React.FC = () => {
     description: '',
     productWebsite: '',
     targetAudience: '',
+    customerPainPoints: [] as string[],
+    competitorDifferentiation: '',
+    demoBookingProcess: '',
+    purchasingInstructions: '',
     salesPitch: '',
     tone: 'Consultative' as Product['tone'],
     preferredLanguage: 'English',
@@ -66,6 +70,7 @@ export const ProductsPage: React.FC = () => {
 
   // Feature input temp state
   const [newFeatureText, setNewFeatureText] = useState('');
+  const [newPainPointText, setNewPainPointText] = useState('');
   const [newFaqQ, setNewFaqQ] = useState('');
   const [newFaqA, setNewFaqA] = useState('');
   const [newObjText, setNewObjText] = useState('');
@@ -90,6 +95,10 @@ export const ProductsPage: React.FC = () => {
       description: '',
       productWebsite: 'https://',
       targetAudience: '',
+      customerPainPoints: ['High manual overhead and repetitive workflows', 'Disconnected data silos slowing decision velocity'],
+      competitorDifferentiation: 'Architected with modern zero-overhead automation, predictable pricing, and 30-minute self-serve onboarding.',
+      demoBookingProcess: 'Offer two specific 15-minute time slots (tomorrow or Thursday) to walk through a live architecture demo. Confirm attendee email before submitting.',
+      purchasingInstructions: 'Direct customer to self-serve sign up page or coordinate an enterprise evaluation invoice.',
       salesPitch: '',
       tone: 'Consultative',
       preferredLanguage: 'English',
@@ -102,6 +111,7 @@ export const ProductsPage: React.FC = () => {
       active: true
     });
     setNewFeatureText('');
+    setNewPainPointText('');
     setNewFaqQ('');
     setNewFaqA('');
     setNewObjText('');
@@ -122,6 +132,10 @@ export const ProductsPage: React.FC = () => {
       description: prod.description,
       productWebsite: prod.productWebsite,
       targetAudience: prod.targetAudience,
+      customerPainPoints: prod.customerPainPoints ? [...prod.customerPainPoints] : [],
+      competitorDifferentiation: prod.competitorDifferentiation || '',
+      demoBookingProcess: prod.demoBookingProcess || '',
+      purchasingInstructions: prod.purchasingInstructions || '',
       salesPitch: prod.salesPitch,
       tone: prod.tone,
       preferredLanguage: prod.preferredLanguage,
@@ -312,6 +326,18 @@ export const ProductsPage: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Pain Points preview */}
+                {prod.customerPainPoints && prod.customerPainPoints.length > 0 && (
+                  <div className="p-2.5 rounded-xl bg-amber-950/20 border border-amber-500/20 text-xs">
+                    <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block mb-0.5">
+                      Target Pain Point ({prod.customerPainPoints.length} configured)
+                    </span>
+                    <p className="text-[11px] text-amber-200/90 line-clamp-1">
+                      • {prod.customerPainPoints[0]}
+                    </p>
+                  </div>
+                )}
+
                 {/* Pricing summary */}
                 <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800/80">
                   <div className="flex items-center gap-1.5 text-slate-300">
@@ -448,6 +474,55 @@ export const ProductsPage: React.FC = () => {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Customer Pain Points */}
+              {viewProduct.customerPainPoints && viewProduct.customerPainPoints.length > 0 && (
+                <div>
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-2">
+                    Customer Pain Points Addressed ({viewProduct.customerPainPoints.length})
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {viewProduct.customerPainPoints.map((pp, idx) => (
+                      <div key={idx} className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 flex items-start gap-2">
+                        <span className="text-amber-400 font-bold">•</span>
+                        <span>{pp}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Competitor Differentiation */}
+              {viewProduct.competitorDifferentiation && (
+                <div>
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-1">
+                    Competitor Differentiation & Moat
+                  </span>
+                  <p className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 leading-relaxed">
+                    {viewProduct.competitorDifferentiation}
+                  </p>
+                </div>
+              )}
+
+              {/* Demo Booking & Purchasing Protocols */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                {viewProduct.demoBookingProcess && (
+                  <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+                    <span className="font-bold text-indigo-400 block mb-1 uppercase text-[10px] tracking-wider">
+                      Demo Booking Protocol
+                    </span>
+                    <p className="text-slate-300 leading-relaxed">{viewProduct.demoBookingProcess}</p>
+                  </div>
+                )}
+                {viewProduct.purchasingInstructions && (
+                  <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+                    <span className="font-bold text-emerald-400 block mb-1 uppercase text-[10px] tracking-wider">
+                      Purchasing Instructions / CTA
+                    </span>
+                    <p className="text-slate-300 leading-relaxed">{viewProduct.purchasingInstructions}</p>
+                  </div>
+                )}
               </div>
 
               {/* FAQs */}
@@ -668,6 +743,97 @@ export const ProductsPage: React.FC = () => {
                     value={formData.callToAction}
                     onChange={(e) => setFormData({ ...formData, callToAction: e.target.value })}
                     placeholder="e.g. Schedule a 15-minute live architecture demo"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Customer Pain Points */}
+              <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block font-semibold text-slate-300">Target Customer Pain Points</label>
+                  <span className="text-[10px] text-slate-400">Used for discovery & qualification</span>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newPainPointText}
+                    onChange={(e) => setNewPainPointText(e.target.value)}
+                    placeholder="e.g. Sales reps spending 65% of time on manual data entry..."
+                    className="flex-1 px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!newPainPointText.trim()) return;
+                      setFormData({
+                        ...formData,
+                        customerPainPoints: [...formData.customerPainPoints, newPainPointText.trim()],
+                      });
+                      setNewPainPointText('');
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium shrink-0"
+                  >
+                    Add Pain Point
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {formData.customerPainPoints.map((pp, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-950/40 text-amber-200 border border-amber-800/60 text-xs"
+                    >
+                      <span>• {pp}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormData({
+                            ...formData,
+                            customerPainPoints: formData.customerPainPoints.filter((_, idx) => idx !== i),
+                          })
+                        }
+                        className="text-amber-400 hover:text-rose-400 ml-1 font-bold"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Competitor Differentiation */}
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Competitor Differentiation & Competitive Moat
+                </label>
+                <textarea
+                  rows={2}
+                  value={formData.competitorDifferentiation}
+                  onChange={(e) => setFormData({ ...formData, competitorDifferentiation: e.target.value })}
+                  placeholder="Explain how this product differentiates against key alternatives (e.g. Salesforce, Datadog)..."
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              {/* Demo Booking Process & Purchasing Instructions */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Demo Booking Protocol</label>
+                  <textarea
+                    rows={2}
+                    value={formData.demoBookingProcess}
+                    onChange={(e) => setFormData({ ...formData, demoBookingProcess: e.target.value })}
+                    placeholder="e.g. Propose 2 time slots for a 15-minute live demo..."
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Purchasing Instructions / CTA</label>
+                  <textarea
+                    rows={2}
+                    value={formData.purchasingInstructions}
+                    onChange={(e) => setFormData({ ...formData, purchasingInstructions: e.target.value })}
+                    placeholder="e.g. Direct customer to https://example.com/pricing..."
                     className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                   />
                 </div>

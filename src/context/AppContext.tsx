@@ -6,6 +6,8 @@ import {
   AgentSettings,
   AppSettings,
   TranscriptMessage,
+  SalesStatus,
+  FollowUpTask,
 } from '../types';
 import {
   INITIAL_PRODUCTS,
@@ -13,6 +15,7 @@ import {
   INITIAL_CALLS,
   INITIAL_AGENT_SETTINGS,
   INITIAL_APP_SETTINGS,
+  INITIAL_FOLLOW_UP_TASKS,
 } from '../data/mockData';
 import { useAuth } from './AuthContext';
 import { supabase, getRecordingSignedUrl, uploadRecordingFile } from '../lib/supabase';
@@ -24,6 +27,7 @@ export type NavigationTab =
   | 'products'
   | 'leads'
   | 'call-history'
+  | 'tasks'
   | 'agent-settings'
   | 'settings';
 
@@ -33,6 +37,7 @@ interface AppContextValue {
   products: Product[];
   leads: Lead[];
   calls: CallRecord[];
+  followUpTasks: FollowUpTask[];
   agentSettings: AgentSettings;
   appSettings: AppSettings;
   selectedCallId: string | null;
@@ -58,6 +63,13 @@ interface AppContextValue {
   updateLead: (id: string, lead: Partial<Lead>) => Promise<void>;
   deleteLead: (id: string) => Promise<void>;
   addCallRecord: (call: CallRecord, audioBlob?: Blob) => Promise<void>;
+  deleteCallRecord: (id: string) => Promise<void>;
+  purgeExpiredRecords: (retentionDays: number) => Promise<{ success: boolean; purgedCount: number; message: string }>;
+  manuallyCorrectCallStatus: (callId: string, newStatus: SalesStatus, notes?: string) => Promise<void>;
+  createFollowUpTask: (task: Omit<FollowUpTask, 'id' | 'created_at' | 'updated_at'>) => Promise<void>;
+  updateFollowUpTask: (id: string, updates: Partial<FollowUpTask>) => Promise<void>;
+  markTaskComplete: (id: string) => Promise<void>;
+  deleteFollowUpTask: (id: string) => Promise<void>;
   updateAgentSettings: (settings: Partial<AgentSettings>) => Promise<void>;
   updateAppSettings: (settings: Partial<AppSettings>) => Promise<void>;
   updateIntegrationStatus: (providerName: string, status: 'Connected' | 'Not Configured' | 'Action Required') => void;
@@ -73,6 +85,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [leads, setLeads] = useState<Lead[]>(INITIAL_LEADS);
   const [calls, setCalls] = useState<CallRecord[]>(INITIAL_CALLS);
+  const [followUpTasks, setFollowUpTasks] = useState<FollowUpTask[]>(INITIAL_FOLLOW_UP_TASKS);
   const [agentSettings, setAgentSettings] = useState<AgentSettings>(INITIAL_AGENT_SETTINGS);
   const [appSettings, setAppSettings] = useState<AppSettings>(INITIAL_APP_SETTINGS);
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
@@ -153,6 +166,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             features: Array.isArray(p.features) ? p.features : [],
             pricing: Array.isArray(p.pricing) ? p.pricing : [],
             targetAudience: p.target_audience || '',
+            customerPainPoints: Array.isArray(p.customer_pain_points) ? p.customer_pain_points : [],
+            competitorDifferentiation: p.competitor_differentiation || '',
+            demoBookingProcess: p.demo_booking_process || '',
+            purchasingInstructions: p.purchasing_instructions || '',
             faqs: faqsForProd.length > 0 ? faqsForProd : [
               { q: 'What is the setup time?', a: 'Standard setup takes under 30 minutes.' }
             ],
@@ -249,6 +266,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               signedAudioUrl = await getRecordingSignedUrl(c.recording_storage_path);
             }
 
+            const rawAnalysis = c.ai_analysis_metadata?.analysis || sumForCall?.structured_analysis || null;
+
             return {
               id: c.id,
               workspace_id: c.workspace_id,
@@ -266,6 +285,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               endTime: c.end_time,
               durationSeconds: c.duration_seconds || 0,
               status: c.sales_status,
+              originalAiStatus: c.original_ai_status || rawAnalysis?.original_ai_status || c.sales_status,
+              isManuallyCorrected: Boolean(c.is_manually_corrected),
+              correctedBy: c.corrected_by || undefined,
+              correctedAt: c.corrected_at || undefined,
+              correctionNotes: c.correction_notes || undefined,
               callStatus: c.call_status,
               language: c.selected_language || 'English',
               recordingAvailable: Boolean(c.recording_storage_path),
@@ -284,11 +308,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 },
               ],
               aiSummary: sumForCall?.executive_summary || 'Customer engaged positively with the AI SDR.',
-              objections: Array.isArray(c.objections) ? c.objections : ['Budget constraints'],
-              customerRequirements: Array.isArray(c.customer_requirements) ? c.customer_requirements : ['API Integration'],
-              nextSteps: Array.isArray(c.next_steps) ? c.next_steps : ['Follow-up scheduled'],
+              customerBusinessAndUseCase: rawAnalysis?.customer_business_and_use_case || sumForCall?.customer_business_and_use_case || 'Unknown',
+              customerRequirements: Array.isArray(c.customer_requirements) ? c.customer_requirements : [],
+              featuresDiscussed: Array.isArray(rawAnalysis?.features_discussed) ? rawAnalysis.features_discussed : [],
+              questionsAsked: Array.isArray(rawAnalysis?.questions_asked) ? rawAnalysis.questions_asked : [],
+              objections: Array.isArray(c.objections) ? c.objections : [],
+              buyingIntent: rawAnalysis?.buying_intent || c.buying_intent || 'Medium',
+              budgetOrTimeline: rawAnalysis?.budget_or_timeline || sumForCall?.budget_or_timeline || 'Unknown',
+              promisedActions: Array.isArray(rawAnalysis?.promised_actions) ? rawAnalysis.promised_actions : [],
+              nextSteps: Array.isArray(c.next_steps) ? c.next_steps : [],
+              followUpDate: c.follow_up_date || rawAnalysis?.follow_up_date || null,
+              evidenceQuotes: Array.isArray(rawAnalysis?.evidence_quotes) ? rawAnalysis.evidence_quotes : (Array.isArray(sumForCall?.evidence_quotes) ? sumForCall.evidence_quotes : []),
+              structuredAnalysis: rawAnalysis,
               consentStatus: c.consent_status ?? true,
               consentTimestamp: c.consent_timestamp,
+              consentText: 'Two-Party Recording Consent verified prior to conversational outreach.',
+              summaryStatus: sumForCall ? 'Completed' : (c.call_status === 'Completed' ? 'Completed' : 'Processing'),
             };
           })
         );
@@ -312,7 +347,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           voiceGender: dbSettings.voice_gender,
           personality: dbSettings.personality,
           salesApproach: dbSettings.sales_approach,
+          salesTone: dbSettings.sales_tone || 'Consultative',
           openingGreeting: dbSettings.opening_greeting,
+          qualificationQuestions: Array.isArray(dbSettings.qualification_questions) && dbSettings.qualification_questions.length > 0
+            ? dbSettings.qualification_questions
+            : INITIAL_AGENT_SETTINGS.qualificationQuestions,
+          productSpecificInstructions: dbSettings.product_specific_instructions || INITIAL_AGENT_SETTINGS.productSpecificInstructions,
+          closingBehavior: dbSettings.closing_behavior || INITIAL_AGENT_SETTINGS.closingBehavior,
           supportedLanguages: dbSettings.supported_languages || [],
           conversationRules: dbSettings.conversation_rules || [],
           followUpBehavior: dbSettings.follow_up_behavior,
@@ -322,6 +363,38 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           maxCallDurationMinutes: dbSettings.max_call_duration_minutes || 12,
           ambientNoiseSuppression: dbSettings.ambient_noise_suppression ?? true,
         });
+      }
+
+      // 5. Fetch Follow-up Tasks
+      const { data: dbTasks } = await supabase
+        .from('follow_up_tasks')
+        .select('*')
+        .eq('workspace_id', wsId)
+        .order('due_date', { ascending: true });
+
+      if (dbTasks && dbTasks.length > 0) {
+        const mappedTasks: FollowUpTask[] = dbTasks.map((t) => {
+          const matchedLead = dbLeads?.find((l) => l.id === t.lead_id);
+          const matchedCall = dbCalls?.find((c) => c.id === t.call_session_id);
+          return {
+            id: t.id,
+            workspace_id: t.workspace_id,
+            call_session_id: t.call_session_id,
+            lead_id: t.lead_id,
+            customerName: matchedLead?.name || matchedCall?.customer_name || 'Prospect',
+            customerEmail: matchedLead?.email || matchedCall?.customer_email || '',
+            productName: matchedCall?.product_name || matchedLead?.associated_product_name || 'SaaS Platform',
+            title: t.title,
+            description: t.description || '',
+            due_date: t.due_date || new Date().toISOString(),
+            status: t.status || 'pending',
+            priority: t.priority || 'medium',
+            assigned_to: t.assigned_to || 'Enterprise AE Team',
+            created_at: t.created_at,
+            updated_at: t.updated_at,
+          };
+        });
+        setFollowUpTasks(mappedTasks);
       }
     } catch (err: any) {
       console.warn('Workspace sync warning:', err.message || err);
@@ -361,6 +434,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             features: prodData.features,
             pricing: prodData.pricing,
             target_audience: prodData.targetAudience,
+            customer_pain_points: prodData.customerPainPoints || [],
+            competitor_differentiation: prodData.competitorDifferentiation || '',
+            demo_booking_process: prodData.demoBookingProcess || '',
+            purchasing_instructions: prodData.purchasingInstructions || '',
             product_website: prodData.productWebsite,
             sales_pitch: prodData.salesPitch,
             tone: prodData.tone,
@@ -415,6 +492,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (updatedFields.features !== undefined) payload.features = updatedFields.features;
         if (updatedFields.pricing !== undefined) payload.pricing = updatedFields.pricing;
         if (updatedFields.targetAudience !== undefined) payload.target_audience = updatedFields.targetAudience;
+        if (updatedFields.customerPainPoints !== undefined) payload.customer_pain_points = updatedFields.customerPainPoints;
+        if (updatedFields.competitorDifferentiation !== undefined) payload.competitor_differentiation = updatedFields.competitorDifferentiation;
+        if (updatedFields.demoBookingProcess !== undefined) payload.demo_booking_process = updatedFields.demoBookingProcess;
+        if (updatedFields.purchasingInstructions !== undefined) payload.purchasing_instructions = updatedFields.purchasingInstructions;
         if (updatedFields.productWebsite !== undefined) payload.product_website = updatedFields.productWebsite;
         if (updatedFields.salesPitch !== undefined) payload.sales_pitch = updatedFields.salesPitch;
         if (updatedFields.tone !== undefined) payload.tone = updatedFields.tone;
@@ -551,52 +632,69 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const matchedLead = leads.find((l) => l.email.toLowerCase() === call.customerEmail.toLowerCase());
 
         let storagePath: string | null = null;
-        if (audioBlob) {
+        if (audioBlob && call.consentStatus !== false) {
           storagePath = await uploadRecordingFile(wsId, call.id, audioBlob);
+        } else if (call.recordingStoragePath && call.consentStatus !== false) {
+          storagePath = call.recordingStoragePath;
         } else {
-          storagePath = `${wsId}/${call.id}.wav`;
+          storagePath = null;
         }
 
-        // 1. Insert call_session
-        const { data: sessionRow, error: sessionErr } = await supabase
-          .from('call_sessions')
-          .insert({
-            workspace_id: wsId,
-            lead_id: matchedLead ? matchedLead.id : null,
-            product_id: call.productId || null,
-            customer_name: call.customerName,
-            customer_email: call.customerEmail,
-            customer_phone: call.customerPhone,
-            product_name: call.productName,
-            start_time: call.startTime || new Date().toISOString(),
-            end_time: new Date().toISOString(),
-            duration_seconds: call.durationSeconds,
-            call_status: 'Completed',
-            selected_language: call.language,
-            consent_status: call.consentStatus ?? true,
-            consent_timestamp: new Date().toISOString(),
-            recording_storage_path: storagePath,
-            customer_requirements: call.customerRequirements,
-            objections: call.objections,
-            next_steps: call.nextSteps,
-            sales_status: call.status,
-            ai_score: call.aiScore,
-            sentiment: call.sentiment,
-            ai_analysis_metadata: {
-              voiceEngine: 'ElevenLabs',
-              asrModel: 'Deepgram Nova-2',
-              timestamp: new Date().toISOString(),
-            },
-          })
-          .select()
-          .single();
+        // 1. Insert or update call_session (retry idempotency)
+        const sessionPayload = {
+          workspace_id: wsId,
+          lead_id: matchedLead ? matchedLead.id : null,
+          product_id: call.productId || null,
+          customer_name: call.customerName,
+          customer_email: call.customerEmail,
+          customer_phone: call.customerPhone,
+          product_name: call.productName,
+          start_time: call.startTime || new Date().toISOString(),
+          end_time: call.endTime || new Date().toISOString(),
+          duration_seconds: call.durationSeconds,
+          call_status: 'Completed',
+          selected_language: call.language,
+          consent_status: call.consentStatus ?? true,
+          consent_timestamp: new Date().toISOString(),
+          recording_storage_path: storagePath,
+          customer_requirements: call.customerRequirements || [],
+          objections: call.objections || [],
+          next_steps: call.nextSteps || [],
+          sales_status: call.status,
+          original_ai_status: call.originalAiStatus || call.status,
+          is_manually_corrected: Boolean(call.isManuallyCorrected),
+          corrected_by: call.correctedBy || null,
+          corrected_at: call.correctedAt || null,
+          correction_notes: call.correctionNotes || null,
+          follow_up_date: call.followUpDate || null,
+          buying_intent: call.buyingIntent || 'Medium',
+          ai_score: call.aiScore || 85,
+          sentiment: call.sentiment || 'Positive',
+          ai_analysis_metadata: {
+            analysis: call.structuredAnalysis || null,
+            evidenceQuotes: call.evidenceQuotes || [],
+            timestamp: new Date().toISOString(),
+          },
+        };
 
-        if (sessionErr) throw sessionErr;
+        const existingCall = calls.find((c) => c.id === call.id);
+        let sessionId = call.id;
 
-        const sessionId = sessionRow.id;
+        if (existingCall) {
+          await supabase.from('call_sessions').update(sessionPayload).eq('id', call.id);
+        } else {
+          const { data: sessionRow, error: sessionErr } = await supabase
+            .from('call_sessions')
+            .insert(sessionPayload)
+            .select()
+            .single();
 
-        // 2. Insert call_messages
-        if (call.transcript && call.transcript.length > 0) {
+          if (sessionErr) throw sessionErr;
+          sessionId = sessionRow.id;
+        }
+
+        // 2. Insert call_messages if new
+        if (!existingCall && call.transcript && call.transcript.length > 0) {
           const msgRows = call.transcript.map((m, i) => ({
             call_session_id: sessionId,
             workspace_id: wsId,
@@ -609,8 +707,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           await supabase.from('call_messages').insert(msgRows);
         }
 
-        // 3. Insert call_summaries
-        await supabase.from('call_summaries').insert({
+        // 3. Upsert call_summaries
+        const summaryPayload = {
           call_session_id: sessionId,
           workspace_id: wsId,
           executive_summary: call.aiSummary,
@@ -619,10 +717,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           requirements_summary: call.customerRequirements,
           next_steps_summary: call.nextSteps,
           confidence_score: call.aiScore,
-        });
+          structured_analysis: call.structuredAnalysis || {},
+          evidence_quotes: call.evidenceQuotes || [],
+          customer_business_and_use_case: call.customerBusinessAndUseCase || 'Unknown',
+          features_discussed: call.featuresDiscussed || [],
+          questions_asked: call.questionsAsked || [],
+          budget_or_timeline: call.budgetOrTimeline || 'Unknown',
+          promised_actions: call.promisedActions || [],
+        };
+
+        if (existingCall) {
+          await supabase.from('call_summaries').update(summaryPayload).eq('call_session_id', sessionId);
+        } else {
+          await supabase.from('call_summaries').insert(summaryPayload);
+        }
 
         // 4. Insert call_recordings
-        if (storagePath) {
+        if (storagePath && !existingCall) {
           await supabase.from('call_recordings').insert({
             call_session_id: sessionId,
             workspace_id: wsId,
@@ -635,13 +746,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
 
         // 5. Insert recording_consents
-        await supabase.from('recording_consents').insert({
-          call_session_id: sessionId,
-          lead_id: matchedLead ? matchedLead.id : null,
-          workspace_id: wsId,
-          consent_given: call.consentStatus ?? true,
-          consent_text: 'Two-Party Recording Consent verified prior to conversational outreach.',
-        });
+        if (!existingCall) {
+          await supabase.from('recording_consents').insert({
+            call_session_id: sessionId,
+            lead_id: matchedLead ? matchedLead.id : null,
+            workspace_id: wsId,
+            consent_given: call.consentStatus ?? true,
+            consent_text: 'Two-Party Recording Consent verified prior to conversational outreach.',
+          });
+        }
 
         // 6. Update lead sales status in database
         if (matchedLead) {
@@ -654,6 +767,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             .eq('id', matchedLead.id);
         }
 
+        // 7. Enqueue follow-up task if action required
+        if (call.status === 'Demo Requested' || call.status === 'Follow-up Required') {
+          await supabase.from('follow_up_tasks').insert({
+            call_session_id: sessionId,
+            lead_id: matchedLead ? matchedLead.id : null,
+            workspace_id: wsId,
+            title: call.status === 'Demo Requested'
+              ? `Schedule Live Demo for ${call.customerName}`
+              : `Follow-up with ${call.customerName} (${call.productName})`,
+            description: (call.nextSteps && call.nextSteps.join('; ')) || call.aiSummary,
+            due_date: call.followUpDate ? `${call.followUpDate}T10:00:00Z` : new Date(Date.now() + 86400000 * 2).toISOString(),
+            status: 'pending',
+            priority: call.status === 'Demo Requested' ? 'high' : 'medium',
+            assigned_to: 'Enterprise AE Team',
+          });
+        }
+
         // Refresh all workspace tables
         await refreshWorkspaceData();
         return;
@@ -662,8 +792,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     }
 
-    // Local fallback
-    setCalls((prev) => [call, ...prev]);
+    // Local fallback with idempotency check
+    setCalls((prev) => {
+      const idx = prev.findIndex((c) => c.id === call.id);
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = call;
+        return updated;
+      }
+      return [call, ...prev];
+    });
+
     setLeads((prev) =>
       prev.map((l) => {
         if (l.email.toLowerCase() === call.customerEmail.toLowerCase()) {
@@ -676,6 +815,255 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return l;
       })
     );
+  };
+
+  // Manual Classification Override with Auditing
+  const manuallyCorrectCallStatus = async (
+    callId: string,
+    newStatus: SalesStatus,
+    notes?: string
+  ) => {
+    const existingCall = calls.find((c) => c.id === callId);
+    if (!existingCall) return;
+
+    const originalAi = existingCall.originalAiStatus || existingCall.status;
+    const now = new Date().toISOString();
+    const actor = user?.email || 'Authorized Auditor';
+
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        const { error } = await supabase
+          .from('call_sessions')
+          .update({
+            sales_status: newStatus,
+            original_ai_status: originalAi,
+            is_manually_corrected: true,
+            corrected_by: actor,
+            corrected_at: now,
+            correction_notes: notes || 'Manual audit classification override',
+          })
+          .eq('id', callId);
+
+        if (error) throw error;
+
+        // Update lead sales status if lead exists
+        if (existingCall.customerEmail) {
+          await supabase
+            .from('leads')
+            .update({
+              sales_status: newStatus,
+              last_contacted_at: now,
+            })
+            .eq('email', existingCall.customerEmail);
+        }
+
+        await refreshWorkspaceData();
+        showToast('Classification Updated', `Status changed to ${newStatus}. Original AI status (${originalAi}) preserved for audit.`, 'success');
+        return;
+      } catch (err: any) {
+        showToast('Update Failed', err.message, 'error');
+      }
+    }
+
+    // Local fallback update
+    setCalls((prev) =>
+      prev.map((c) =>
+        c.id === callId
+          ? {
+              ...c,
+              status: newStatus,
+              originalAiStatus: originalAi,
+              isManuallyCorrected: true,
+              correctedBy: actor,
+              correctedAt: now,
+              correctionNotes: notes || 'Manual audit classification override',
+            }
+          : c
+      )
+    );
+    setLeads((prev) =>
+      prev.map((l) =>
+        l.email.toLowerCase() === existingCall.customerEmail.toLowerCase()
+          ? { ...l, salesStatus: newStatus, lastContactedAt: now.split('T')[0] }
+          : l
+      )
+    );
+    showToast('Classification Updated', `Status changed to ${newStatus}. Original AI status (${originalAi}) preserved.`, 'success');
+  };
+
+  // Secure Individual Call Record Deletion
+  const deleteCallRecord = async (id: string) => {
+    const targetCall = calls.find((c) => c.id === id);
+    if (!targetCall) return;
+
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        if (targetCall.recordingStoragePath) {
+          try {
+            await supabase.storage
+              .from('call-recordings')
+              .remove([targetCall.recordingStoragePath]);
+          } catch (stErr) {
+            console.warn('Storage delete notice:', stErr);
+          }
+        }
+
+        const { error } = await supabase.from('call_sessions').delete().eq('id', id);
+        if (error) throw error;
+
+        await refreshWorkspaceData();
+        showToast('Call Record Deleted', 'Call session, transcript, and recording purged.', 'success');
+        return;
+      } catch (err: any) {
+        showToast('Delete Error', err.message, 'error');
+        return;
+      }
+    }
+
+    setCalls((prev) => prev.filter((c) => c.id !== id));
+    showToast('Call Record Deleted', 'Call session purged from workspace.', 'success');
+  };
+
+  // Retention Purge Policy Execution
+  const purgeExpiredRecords = async (
+    retentionDays: number
+  ): Promise<{ success: boolean; purgedCount: number; message: string }> => {
+    if (retentionDays < 7) {
+      return { success: false, purgedCount: 0, message: 'Retention threshold cannot be under 7 days.' };
+    }
+
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        const { data, error } = await supabase.rpc('purge_expired_call_records', {
+          retention_days: retentionDays,
+        });
+
+        if (error) {
+          const cutoff = new Date(Date.now() - retentionDays * 86400000).toISOString();
+          const { error: delErr } = await supabase
+            .from('call_sessions')
+            .delete()
+            .eq('workspace_id', activeWorkspace.id)
+            .lt('start_time', cutoff);
+
+          if (delErr) throw delErr;
+          await refreshWorkspaceData();
+          return { success: true, purgedCount: 0, message: `Purged records older than ${retentionDays} days.` };
+        }
+
+        await refreshWorkspaceData();
+        const count = data?.purged_count || 0;
+        return {
+          success: true,
+          purgedCount: count,
+          message: `Successfully purged ${count} call records older than ${retentionDays} days.`,
+        };
+      } catch (err: any) {
+        return { success: false, purgedCount: 0, message: err.message || 'Error purging records' };
+      }
+    }
+
+    const cutoffDate = new Date(Date.now() - retentionDays * 86400000);
+    let count = 0;
+    setCalls((prev) => {
+      const remaining = prev.filter((c) => {
+        const callTime = new Date(c.startTime || c.date);
+        if (callTime < cutoffDate) {
+          count++;
+          return false;
+        }
+        return true;
+      });
+      return remaining;
+    });
+
+    return {
+      success: true,
+      purgedCount: count,
+      message: `Purged ${count} call records older than ${retentionDays} days based on workspace retention policy.`,
+    };
+  };
+
+  // Follow-Up Task Management
+  const createFollowUpTask = async (taskData: Omit<FollowUpTask, 'id' | 'created_at' | 'updated_at'>) => {
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        const { error } = await supabase.from('follow_up_tasks').insert({
+          workspace_id: activeWorkspace.id,
+          call_session_id: taskData.call_session_id || null,
+          lead_id: taskData.lead_id || null,
+          title: taskData.title,
+          description: taskData.description || '',
+          due_date: taskData.due_date,
+          status: taskData.status || 'pending',
+          priority: taskData.priority || 'medium',
+          assigned_to: taskData.assigned_to || 'Enterprise AE Team',
+        });
+
+        if (error) throw error;
+        await refreshWorkspaceData();
+        showToast('Task Scheduled', `Follow-up task "${taskData.title}" queued successfully.`, 'success');
+        return;
+      } catch (err: any) {
+        showToast('Task Creation Error', err.message, 'error');
+      }
+    }
+
+    const newTask: FollowUpTask = {
+      ...taskData,
+      id: `task-${Date.now()}`,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    setFollowUpTasks((prev) => [newTask, ...prev]);
+    showToast('Task Scheduled', `Follow-up task "${taskData.title}" queued successfully.`, 'success');
+  };
+
+  const updateFollowUpTask = async (id: string, updates: Partial<FollowUpTask>) => {
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        const payload: Record<string, any> = { updated_at: new Date().toISOString() };
+        if (updates.title !== undefined) payload.title = updates.title;
+        if (updates.description !== undefined) payload.description = updates.description;
+        if (updates.due_date !== undefined) payload.due_date = updates.due_date;
+        if (updates.status !== undefined) payload.status = updates.status;
+        if (updates.priority !== undefined) payload.priority = updates.priority;
+        if (updates.assigned_to !== undefined) payload.assigned_to = updates.assigned_to;
+
+        const { error } = await supabase.from('follow_up_tasks').update(payload).eq('id', id);
+        if (error) throw error;
+        await refreshWorkspaceData();
+        return;
+      } catch (err: any) {
+        showToast('Task Update Error', err.message, 'error');
+      }
+    }
+
+    setFollowUpTasks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, ...updates, updated_at: new Date().toISOString() } : t))
+    );
+  };
+
+  const markTaskComplete = async (id: string) => {
+    await updateFollowUpTask(id, { status: 'completed' });
+    showToast('Task Completed', 'Task marked as completed.', 'success');
+  };
+
+  const deleteFollowUpTask = async (id: string) => {
+    if (isConfigured && activeWorkspace?.id) {
+      try {
+        const { error } = await supabase.from('follow_up_tasks').delete().eq('id', id);
+        if (error) throw error;
+        await refreshWorkspaceData();
+        showToast('Task Deleted', 'Follow-up task removed.', 'info');
+        return;
+      } catch (err: any) {
+        showToast('Task Delete Error', err.message, 'error');
+      }
+    }
+
+    setFollowUpTasks((prev) => prev.filter((t) => t.id !== id));
+    showToast('Task Deleted', 'Follow-up task removed.', 'info');
   };
 
   // Agent Settings Persistence
@@ -691,7 +1079,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (updated.voiceGender !== undefined) payload.voice_gender = updated.voiceGender;
         if (updated.personality !== undefined) payload.personality = updated.personality;
         if (updated.salesApproach !== undefined) payload.sales_approach = updated.salesApproach;
+        if (updated.salesTone !== undefined) payload.sales_tone = updated.salesTone;
         if (updated.openingGreeting !== undefined) payload.opening_greeting = updated.openingGreeting;
+        if (updated.qualificationQuestions !== undefined) payload.qualification_questions = updated.qualificationQuestions;
+        if (updated.productSpecificInstructions !== undefined) payload.product_specific_instructions = updated.productSpecificInstructions;
+        if (updated.closingBehavior !== undefined) payload.closing_behavior = updated.closingBehavior;
         if (updated.supportedLanguages !== undefined) payload.supported_languages = updated.supportedLanguages;
         if (updated.conversationRules !== undefined) payload.conversation_rules = updated.conversationRules;
         if (updated.followUpBehavior !== undefined) payload.follow_up_behavior = updated.followUpBehavior;
@@ -757,6 +1149,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         products,
         leads,
         calls,
+        followUpTasks,
         agentSettings,
         appSettings,
         selectedCallId,
@@ -774,6 +1167,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateLead,
         deleteLead,
         addCallRecord,
+        deleteCallRecord,
+        purgeExpiredRecords,
+        manuallyCorrectCallStatus,
+        createFollowUpTask,
+        updateFollowUpTask,
+        markTaskComplete,
+        deleteFollowUpTask,
         updateAgentSettings,
         updateAppSettings,
         updateIntegrationStatus,

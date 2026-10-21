@@ -10,6 +10,7 @@ import { LiveCallPage } from './components/live-call/LiveCallPage';
 import { ProductsPage } from './components/products/ProductsPage';
 import { LeadsPage } from './components/leads/LeadsPage';
 import { CallHistoryPage } from './components/calls/CallHistoryPage';
+import { FollowUpTasksPage } from './components/tasks/FollowUpTasksPage';
 import { AgentSettingsPage } from './components/agent-settings/AgentSettingsPage';
 import { SettingsPage } from './components/settings/SettingsPage';
 import { Mic2, Loader2 } from 'lucide-react';
@@ -51,6 +52,8 @@ const AppContent: React.FC = () => {
         return <LeadsPage />;
       case 'call-history':
         return <CallHistoryPage />;
+      case 'tasks':
+        return <FollowUpTasksPage />;
       case 'agent-settings':
         return <AgentSettingsPage />;
       case 'settings':
